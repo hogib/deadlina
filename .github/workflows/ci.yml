@@ -99,7 +99,7 @@ jobs:
           echo "Server = https://archive.archlinux.org/repos/${ARCH_ARCHIVE_DATE}/\$repo/os/\$arch" \
             > /etc/pacman.d/mirrorlist
           pacman -Syyuu --noconfirm --needed \
-            git cmake ninja gcc clang llvm compiler-rt pkgconf \
+            git cmake ninja gcc clang llvm compiler-rt pkgconf nlohmann-json \
             alsa-lib freetype2 fontconfig libglvnd qt6-base \
             libx11 libxext libxrandr libxinerama libxcursor libxrender libxcomposite
 

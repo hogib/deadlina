@@ -1,0 +1,545 @@
+{
+  "format": 1,
+  "written_by": "LINA tests 1",
+  "next_id": 50,
+  "tempo": 93.47,
+  "time_signature": [7, 8],
+  "loop": { "enabled": true, "start": 211680, "length": 105840 },
+  "start_marker": 45360,
+  "launch_quantisation": "1/2",
+  "media": [
+    {
+      "id": 2,
+      "path": "media/kick-3f9a1c2e.wav",
+      "size": 352844,
+      "hash": "3f9a1c2e5d0b4a6f8e7c9d1b2a3f4e5d6c7b8a9f0e1d2c3b4a5f6e7d8c9b0a1f",
+      "sample_rate": 44100
+    },
+    {
+      "id": 3,
+      "path": "/home/someone/samples/snare.flac",
+      "size": 5000000000,
+      "hash": "f0e1d2c3b4a5968778695a4b3c2d1e0ff0e1d2c3b4a5968778695a4b3c2d1e0f",
+      "sample_rate": 96000
+    }
+  ],
+  "scenes": [
+    { "id": 4, "name": "Intro" },
+    { "id": 5, "name": "Verse \"two\" \\ café ✓\tend\n" },
+    { "id": 6, "name": "" }
+  ],
+  "tracks": [
+    {
+      "id": 9,
+      "kind": "audio",
+      "name": "Drums",
+      "colour": "#ff8000",
+      "mixer": {
+        "volume_db": -6.5,
+        "pan": -0.25,
+        "mute": false,
+        "solo": false,
+        "armed": true,
+        "monitoring": "on",
+        "input": { "type": "audio", "channel": 2, "stereo": true },
+        "sends": [
+          { "target": 7, "level_db": -12.0 },
+          { "target": 8, "level_db": -0.1 }
+        ]
+      },
+      "devices": [
+        {
+          "id": 27,
+          "role": "audio_effect",
+          "plugin": {
+            "format": "LV2",
+            "identifier": "urn:lina:gate",
+            "name": "Gate",
+            "vendor": "LINA tests",
+            "version": "1.2.3"
+          },
+          "state": null,
+          "bypassed": false,
+          "parameters": [
+            { "id": "threshold", "value": 1e-06 }
+          ]
+        }
+      ],
+      "slots": [
+        {
+          "id": 10,
+          "scene": 4,
+          "clip": {
+            "id": 30,
+            "name": "kick loop",
+            "colour": "#00ff7f",
+            "position": 0,
+            "length": 90720,
+            "content_start": 15120,
+            "loop": { "enabled": true, "start": 30240, "length": 60480 },
+            "launch_quantisation": "none",
+            "content": {
+              "type": "audio",
+              "media": 2,
+              "region": { "start": 441, "end": 352800 },
+              "gain_db": -3.25,
+              "follow_tempo": true,
+              "stretch_mode": "repitch",
+              "transpose_cents": -1200,
+              "warp": {
+                "origin": "detected",
+                "markers": [
+                  { "sample": 0, "tick": 0 },
+                  { "sample": 176400, "tick": 60480 },
+                  { "sample": 352800, "tick": 120960 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": 11,
+          "scene": 5,
+          "clip": null
+        },
+        {
+          "id": 12,
+          "scene": 6,
+          "clip": null
+        }
+      ],
+      "arrangement": [
+        {
+          "id": 31,
+          "name": "audio",
+          "colour": "#808080",
+          "position": 0,
+          "length": 60480,
+          "content_start": 0,
+          "loop": { "enabled": false, "start": 0, "length": 60480 },
+          "launch_quantisation": null,
+          "content": {
+            "type": "audio",
+            "media": 2,
+            "region": { "start": 0, "end": 96000 },
+            "gain_db": 0.0,
+            "follow_tempo": true,
+            "stretch_mode": "stretch",
+            "transpose_cents": 0,
+            "warp": {
+              "origin": "guessed",
+              "markers": [
+                { "sample": 0, "tick": 0 },
+                { "sample": 96000, "tick": 60480 }
+              ]
+            }
+          }
+        },
+        {
+          "id": 32,
+          "name": "snare hit",
+          "colour": "#808080",
+          "position": 120960,
+          "length": 30240,
+          "content_start": 0,
+          "loop": { "enabled": false, "start": 0, "length": 60480 },
+          "launch_quantisation": null,
+          "content": {
+            "type": "audio",
+            "media": 3,
+            "region": { "start": 0, "end": 96000 },
+            "gain_db": 24.0,
+            "follow_tempo": false,
+            "stretch_mode": "stretch",
+            "transpose_cents": 0,
+            "warp": {
+              "origin": "manual",
+              "markers": [
+                { "sample": 0, "tick": 0 },
+                { "sample": 96000, "tick": 60480 }
+              ]
+            }
+          }
+        }
+      ],
+      "automation": [
+        {
+          "id": 44,
+          "target": { "type": "mixer", "parameter": "volume" },
+          "points": [
+            { "time": 0, "value": -96.0 },
+            { "time": 60480, "value": -6.0 },
+            { "time": 60480, "value": 0.0 },
+            { "time": 9007199254740992, "value": 6.0 }
+          ]
+        },
+        {
+          "id": 45,
+          "target": { "type": "mixer", "parameter": "pan" },
+          "points": [
+            { "time": 0, "value": -1.0 },
+            { "time": 120960, "value": 1.0 }
+          ]
+        },
+        {
+          "id": 46,
+          "target": { "type": "send", "target": 7 },
+          "points": [
+            { "time": 30240, "value": -24.5 }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "kind": "midi",
+      "name": "Keys",
+      "colour": "#808080",
+      "mixer": {
+        "volume_db": 0.0,
+        "pan": 0.0,
+        "mute": false,
+        "solo": true,
+        "armed": false,
+        "monitoring": "auto",
+        "input": { "type": "midi_device", "device": "Keystation 61" },
+        "sends": [
+          { "target": 7, "level_db": -96.0 },
+          { "target": 8, "level_db": -96.0 }
+        ]
+      },
+      "devices": [
+        {
+          "id": 25,
+          "role": "instrument",
+          "plugin": {
+            "format": "LV2",
+            "identifier": "urn:lina:synth",
+            "name": "Test Synth",
+            "vendor": "LINA tests",
+            "version": "1.2.3"
+          },
+          "state": "b5ed020be883230d0772b9d60a4410672a2becbbd626afb1ac6a9fd5ea827a35.bin",
+          "bypassed": false,
+          "parameters": [
+            { "id": "cutoff", "value": 0.1 },
+            { "id": "resonance", "value": 0.3333333333333333 }
+          ]
+        },
+        {
+          "id": 26,
+          "role": "audio_effect",
+          "plugin": {
+            "format": "LV2",
+            "identifier": "urn:lina:chorus",
+            "name": "Chorus",
+            "vendor": "LINA tests",
+            "version": "1.2.3"
+          },
+          "state": null,
+          "bypassed": true,
+          "parameters": []
+        }
+      ],
+      "slots": [
+        {
+          "id": 14,
+          "scene": 4,
+          "clip": null
+        },
+        {
+          "id": 15,
+          "scene": 5,
+          "clip": {
+            "id": 33,
+            "name": "chords",
+            "colour": "#808080",
+            "position": 0,
+            "length": 120960,
+            "content_start": 0,
+            "loop": { "enabled": false, "start": 0, "length": 60480 },
+            "launch_quantisation": "8_bars",
+            "content": {
+              "type": "midi",
+              "notes": [
+                { "id": 34, "start": 0, "length": 30240, "pitch": 60, "velocity": 100 },
+                { "id": 35, "start": 0, "length": 30240, "pitch": 64, "velocity": 1 },
+                { "id": 36, "start": 0, "length": 30240, "pitch": 67, "velocity": 127 },
+                { "id": 37, "start": 60480, "length": 1, "pitch": 0, "velocity": 64 },
+                { "id": 38, "start": 60480, "length": 60480, "pitch": 127, "velocity": 64 }
+              ],
+              "controllers": [
+                {
+                  "kind": "pitch_bend",
+                  "controller": 0,
+                  "points": [
+                    { "time": 0, "value": -8192 },
+                    { "time": 15120, "value": 0 },
+                    { "time": 30240, "value": 8191 }
+                  ]
+                },
+                {
+                  "kind": "channel_pressure",
+                  "controller": 0,
+                  "points": [
+                    { "time": 0, "value": 127 }
+                  ]
+                },
+                {
+                  "kind": "control_change",
+                  "controller": 1,
+                  "points": [
+                    { "time": 0, "value": 0 },
+                    { "time": 0, "value": 64 }
+                  ]
+                },
+                {
+                  "kind": "control_change",
+                  "controller": 64,
+                  "points": [
+                    { "time": 105840, "value": 127 }
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "id": 16,
+          "scene": 6,
+          "clip": null
+        }
+      ],
+      "arrangement": [],
+      "automation": [
+        {
+          "id": 47,
+          "target": { "type": "device_parameter", "device": 25, "parameter": "cutoff" },
+          "points": [
+            { "time": 0, "value": 0.0 },
+            { "time": 241920, "value": 0.12345678901234566 }
+          ]
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "kind": "midi",
+      "name": "Bass",
+      "colour": "#808080",
+      "mixer": {
+        "volume_db": -96.0,
+        "pan": 0.0,
+        "mute": true,
+        "solo": false,
+        "armed": false,
+        "monitoring": "off",
+        "input": { "type": "all_midi" },
+        "sends": [
+          { "target": 7, "level_db": -96.0 },
+          { "target": 8, "level_db": -96.0 }
+        ]
+      },
+      "devices": [],
+      "slots": [
+        {
+          "id": 18,
+          "scene": 4,
+          "clip": null
+        },
+        {
+          "id": 19,
+          "scene": 5,
+          "clip": null
+        },
+        {
+          "id": 20,
+          "scene": 6,
+          "clip": null
+        }
+      ],
+      "arrangement": [
+        {
+          "id": 39,
+          "name": "bass line",
+          "colour": "#808080",
+          "position": 60480,
+          "length": 60480,
+          "content_start": 0,
+          "loop": { "enabled": false, "start": 0, "length": 60480 },
+          "launch_quantisation": null,
+          "content": {
+            "type": "midi",
+            "notes": [
+              { "id": 40, "start": 0, "length": 15120, "pitch": 36, "velocity": 100 },
+              { "id": 41, "start": 15120, "length": 15120, "pitch": 36, "velocity": 100 },
+              { "id": 42, "start": 30240, "length": 30240, "pitch": 43, "velocity": 100 }
+            ],
+            "controllers": []
+          }
+        },
+        {
+          "id": 43,
+          "name": "far away",
+          "colour": "#808080",
+          "position": 9007199254680512,
+          "length": 60480,
+          "content_start": 0,
+          "loop": { "enabled": false, "start": 0, "length": 60480 },
+          "launch_quantisation": null,
+          "content": {
+            "type": "midi",
+            "notes": [],
+            "controllers": []
+          }
+        }
+      ],
+      "automation": []
+    },
+    {
+      "id": 21,
+      "kind": "audio",
+      "name": "Vox",
+      "colour": "#808080",
+      "mixer": {
+        "volume_db": 6.0,
+        "pan": 1.0,
+        "mute": false,
+        "solo": false,
+        "armed": false,
+        "monitoring": "auto",
+        "input": { "type": "none" },
+        "sends": [
+          { "target": 7, "level_db": -96.0 },
+          { "target": 8, "level_db": -96.0 }
+        ]
+      },
+      "devices": [],
+      "slots": [
+        {
+          "id": 22,
+          "scene": 4,
+          "clip": null
+        },
+        {
+          "id": 23,
+          "scene": 5,
+          "clip": null
+        },
+        {
+          "id": 24,
+          "scene": 6,
+          "clip": null
+        }
+      ],
+      "arrangement": [],
+      "automation": []
+    }
+  ],
+  "returns": [
+    {
+      "id": 7,
+      "kind": "return",
+      "name": "Reverb",
+      "colour": "#000001",
+      "mixer": {
+        "volume_db": -3.0,
+        "pan": 0.0,
+        "mute": false,
+        "solo": false,
+        "armed": false,
+        "monitoring": "auto",
+        "input": { "type": "none" },
+        "sends": []
+      },
+      "devices": [
+        {
+          "id": 28,
+          "role": "audio_effect",
+          "plugin": {
+            "format": "LV2",
+            "identifier": "urn:lina:hall",
+            "name": "Hall",
+            "vendor": "LINA tests",
+            "version": "1.2.3"
+          },
+          "state": null,
+          "bypassed": false,
+          "parameters": []
+        }
+      ],
+      "slots": [],
+      "arrangement": [],
+      "automation": [
+        {
+          "id": 48,
+          "target": { "type": "mixer", "parameter": "pan" },
+          "points": []
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "kind": "return",
+      "name": "Delay",
+      "colour": "#808080",
+      "mixer": {
+        "volume_db": 0.0,
+        "pan": 0.0,
+        "mute": true,
+        "solo": false,
+        "armed": false,
+        "monitoring": "auto",
+        "input": { "type": "none" },
+        "sends": []
+      },
+      "devices": [],
+      "slots": [],
+      "arrangement": [],
+      "automation": []
+    }
+  ],
+  "master": {
+    "id": 1,
+    "kind": "master",
+    "name": "Master",
+    "colour": "#808080",
+    "mixer": {
+      "volume_db": -1.5,
+      "pan": 0.0,
+      "mute": false,
+      "solo": false,
+      "armed": false,
+      "monitoring": "auto",
+      "input": { "type": "none" },
+      "sends": []
+    },
+    "devices": [
+      {
+        "id": 29,
+        "role": "audio_effect",
+        "plugin": {
+          "format": "LV2",
+          "identifier": "urn:lina:limiter",
+          "name": "Limiter",
+          "vendor": "LINA tests",
+          "version": "1.2.3"
+        },
+        "state": null,
+        "bypassed": false,
+        "parameters": []
+      }
+    ],
+    "slots": [],
+    "arrangement": [],
+    "automation": [
+      {
+        "id": 49,
+        "target": { "type": "mixer", "parameter": "volume" },
+        "points": [
+          { "time": 483840, "value": -96.0 }
+        ]
+      }
+    ]
+  }
+}

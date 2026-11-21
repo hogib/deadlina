@@ -91,3 +91,7 @@ the MIDI 1.0 specification `[literature: MIDI 1.0 Detailed Specification]`.
    existing note material.
 2. Should notes carry no channel (proposed)? It keeps the model simple and suits one instrument
    per track; the cost is that multi-channel hardware setups need another mechanism later.
+3. As built 2026-11-22, to confirm: a note that starts before the clip's content start or loop
+   start does not sound. Splitting a clip in the middle of a held note therefore silences the
+   rest of that note unless the split also splits the note. All notes are sent on MIDI
+   channel 1.

@@ -246,6 +246,9 @@ Result applyOne(Project &project, const AddMedia &command) {
   if (!failures.empty()) {
     return fail(failures.front().fault, projectRef);
   }
+  if (!idsAvailable(project, 1)) {
+    return fail(Fault::IdsExhausted, projectRef);
+  }
   MediaReference &media = project.media.emplace_back(command.media);
   media.id = MediaId{project.nextId++};
   Applied applied{.inverse = Command{RemoveMedia{media.id}}, .changes = {}};
@@ -290,6 +293,9 @@ Result applyOne(Project &project, const RelinkMedia &command) {
   if (command.path.empty()) {
     return fail(Fault::ValueOutOfRange, self);
   }
+  if (!isStorableText(command.path)) {
+    return fail(Fault::TextInvalid, self);
+  }
   if (media->path == command.path) {
     return unchanged();
   }
@@ -306,6 +312,13 @@ Result applyOne(Project &project, const RelinkMedia &command) {
 Result applyOne(Project &project, const AddScene &command) {
   if (command.index > project.scenes.size()) {
     return fail(Fault::IndexOutOfRange, projectRef);
+  }
+  if (!isStorableText(command.name)) {
+    return fail(Fault::TextInvalid, projectRef);
+  }
+  // The scene, and a slot for it on every track.
+  if (!idsAvailable(project, 1 + project.tracks.size())) {
+    return fail(Fault::IdsExhausted, projectRef);
   }
   const SceneId scene{project.nextId++};
   project.scenes.insert(iteratorAt(project.scenes, command.index),
@@ -389,6 +402,9 @@ Result applyOne(Project &project, const RenameScene &command) {
   if (scene->name == command.name) {
     return unchanged();
   }
+  if (!isStorableText(command.name)) {
+    return fail(Fault::TextInvalid, self);
+  }
   Applied applied{
       .inverse =
           Command{RenameScene{.scene = command.scene, .name = scene->name}},
@@ -410,6 +426,13 @@ Result applyOne(Project &project, const AddTrack &command) {
   std::vector<Track> &list = regular ? project.tracks : project.returns;
   if (command.index > list.size()) {
     return fail(Fault::IndexOutOfRange, projectRef);
+  }
+  if (!isStorableText(command.name)) {
+    return fail(Fault::TextInvalid, projectRef);
+  }
+  // The track, and on an audio or MIDI track a slot for every scene.
+  if (!idsAvailable(project, 1 + (regular ? project.scenes.size() : 0))) {
+    return fail(Fault::IdsExhausted, projectRef);
   }
 
   Track track;

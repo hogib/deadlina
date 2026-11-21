@@ -172,9 +172,10 @@ TEST_CASE("device properties and parameter values are set, reported and "
   REQUIRE(device().bypassed);
   REQUIRE(applied(document, set(id, BypassedValue{true})).empty());
 
-  changes = applied(document, set(id, StateValue{"8d41e07.bin"}));
+  const std::string state = std::string(64, 'e') + ".bin";
+  changes = applied(document, set(id, StateValue{state}));
   REQUIRE(says(changes, id, ChangeKind::Changed, Property::State));
-  REQUIRE(device().stateRef == "8d41e07.bin");
+  REQUIRE(device().stateRef == state);
 
   // New values land in identifier order; an existing one is replaced;
   // forgetting removes.

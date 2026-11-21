@@ -15,7 +15,6 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
-#include <iterator>
 #include <stdexcept>
 #include <thread>
 #include <tuple>
@@ -37,12 +36,6 @@ AudioBuffer playTwoNoteSongOnce(const std::filesystem::path &storage,
       {.sampleRate = songSampleRate, .blockSize = blockSize});
   engine.play();
   return engine.process(songFrameCount);
-}
-
-/// How many threads this process has at the moment.
-std::ptrdiff_t liveThreadCount() {
-  return std::distance(std::filesystem::directory_iterator("/proc/self/task"),
-                       std::filesystem::directory_iterator());
 }
 
 bool isSilent(const AudioBuffer &audio) {
@@ -246,7 +239,9 @@ TEST_CASE("worker threads do not change the samples", "[engine][playback]") {
 
   struct Run {
     AudioBuffer audio;
-    std::ptrdiff_t threadsStarted = 0;
+    /// How many threads the engine tells its playback graph to compute
+    /// with, the calling one included.
+    int graphThreads = 0;
   };
   const auto play = [&](const char *folder, int audioThreads) {
     Engine engine(
@@ -258,22 +253,24 @@ TEST_CASE("worker threads do not change the samples", "[engine][playback]") {
     addDelayGainEffect(second, 37, 0.25F);
     auto &third = addTwoNoteSong(engine);
     addDelayGainEffect(third, 4800, -0.5F);
-    const auto threadsBefore = liveThreadCount();
     engine.openManualDevice({.sampleRate = songSampleRate, .blockSize = 256});
     engine.play();
-    const auto threadsStarted = liveThreadCount() - threadsBefore;
     Run run;
-    run.threadsStarted = threadsStarted;
+    // Asked of the engine, not counted in the process: threads of an engine
+    // that has just gone can still be seen there for a moment.
+    run.graphThreads = internal::TracktionAccess::engine(engine)
+                           .getEngineBehaviour()
+                           .getNumberOfCPUsToUseForAudio();
     run.audio = engine.process(songFrameCount);
     return run;
   };
 
   const auto single = play("single", 1);
   const auto pooled = play("pooled", wanted + 1);
-  // The second run really had worker threads: opening the device and
-  // starting playback created that many more threads than in the first.
-  CHECK(pooled.threadsStarted - single.threadsStarted ==
-        std::min(wanted, available));
+  // The second run's graph was given worker threads and the first one's
+  // none: the playback context takes this number less one as its pool.
+  CHECK(single.graphThreads == 1);
+  CHECK(pooled.graphThreads == wanted + 1);
   CHECK(firstSoundingFrame(single.audio.channels.at(0)) == 24000);
   CHECK(single.audio.channels.at(0).at(24000) == 1.0F);
   // Tolerance: none. Each track is computed alone and the mix is summed in

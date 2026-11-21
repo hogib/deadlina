@@ -303,6 +303,10 @@ Result applyOne(Project &project, const AddClip &command) {
           placementFailure(*destination, clip.extent, clip.id, parent)) {
     return std::unexpected(*failure);
   }
+  // The clip, and each of its notes.
+  if (!idsAvailable(project, 1 + (midi != nullptr ? midi->notes.size() : 0))) {
+    return fail(Fault::IdsExhausted, parent);
+  }
 
   clip.id = ClipId{project.nextId++};
   if (midi != nullptr) {
@@ -419,6 +423,9 @@ Result applyOne(Project &project, const AddNotes &command) {
   // The identities are only handed out if the notes are accepted, so until
   // then a failure names the clip, never a note.
   std::vector<Note> fresh = command.notes;
+  if (!idsAvailable(project, fresh.size())) {
+    return fail(Fault::IdsExhausted, site->clip);
+  }
   std::uint64_t nextId = project.nextId;
   for (Note &note : fresh) {
     if (note.id.assigned()) {

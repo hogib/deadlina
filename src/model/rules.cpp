@@ -6,7 +6,10 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
+#include <string_view>
 #include <tuple>
 #include <variant>
 
@@ -31,6 +34,52 @@ void require(bool holds, Fault fault, ObjectRef object, Failures &failures) {
 // enumerations of the model all count up from zero without gaps.
 template <class Enumeration> bool upTo(Enumeration value, Enumeration last) {
   return static_cast<unsigned>(value) <= static_cast<unsigned>(last);
+}
+
+// What a lead byte of UTF-8 announces: how many continuation bytes follow and
+// the smallest and largest value the first of them may have (Unicode, table
+// 3-7). Nothing follows a byte that cannot start a sequence.
+struct Utf8Sequence {
+  std::size_t following;
+  std::uint8_t firstLow;
+  std::uint8_t firstHigh;
+};
+
+constexpr std::uint8_t continuationLow = 0x80;
+constexpr std::uint8_t continuationHigh = 0xBF;
+
+Utf8Sequence sequenceFor(std::uint8_t lead) {
+  if (lead >= 0xC2 && lead <= 0xDF) {
+    return {
+        .following = 1,
+        .firstLow = continuationLow,
+        .firstHigh = continuationHigh,
+    };
+  }
+  if (lead >= 0xE0 && lead <= 0xEF) {
+    // E0 would otherwise allow overlong forms, ED the surrogates.
+    return {
+        .following = 2,
+        .firstLow = lead == 0xE0 ? std::uint8_t{0xA0} : continuationLow,
+        .firstHigh = lead == 0xED ? std::uint8_t{0x9F} : continuationHigh,
+    };
+  }
+  if (lead >= 0xF0 && lead <= 0xF4) {
+    // F0 would otherwise allow overlong forms, F4 values past U+10FFFF.
+    return {
+        .following = 3,
+        .firstLow = lead == 0xF0 ? std::uint8_t{0x90} : continuationLow,
+        .firstHigh = lead == 0xF4 ? std::uint8_t{0x8F} : continuationHigh,
+    };
+  }
+  return {.following = 0, .firstLow = 0, .firstHigh = 0};
+}
+
+constexpr std::size_t contentHashDigits = 64;
+constexpr std::string_view stateSuffix = ".bin";
+
+void requireText(std::string_view text, ObjectRef object, Failures &failures) {
+  require(isStorableText(text), Fault::TextInvalid, object, failures);
 }
 
 bool noteValuesAllowed(const Note &note) {
@@ -85,6 +134,11 @@ void checkParameters(const Device &device, Failures &failures) {
         return !parameter.id.empty() && inRange(parameter.value, 0.0, 1.0);
       });
   require(valuesAllowed, Fault::ValueOutOfRange, self, failures);
+  const bool textsAllowed = std::ranges::all_of(
+      device.parameters, [](const ParameterValue &parameter) {
+        return isStorableText(parameter.id);
+      });
+  require(textsAllowed, Fault::TextInvalid, self, failures);
   const bool sortedAndUnique =
       std::ranges::adjacent_find(
           device.parameters,
@@ -119,6 +173,9 @@ std::optional<Fault> inputFault(TrackKind kind,
 std::optional<Fault> inputFault(TrackKind kind, const MidiDeviceInput &input) {
   if (kind != TrackKind::Midi) {
     return Fault::WrongInputKind;
+  }
+  if (!isStorableText(input.device)) {
+    return Fault::TextInvalid;
   }
   return input.device.empty() ? std::optional{Fault::ValueOutOfRange}
                               : std::nullopt;
@@ -193,6 +250,7 @@ std::optional<ValueRange> targetRange(const Project & /*project*/,
                                       const Track &track,
                                       const DeviceParameterTarget &target) {
   const bool hasParameter = !target.parameter.empty() &&
+                            isStorableText(target.parameter) &&
                             findById(track.devices, target.device) != nullptr;
   return hasParameter ? std::optional{ValueRange{}} : std::nullopt;
 }
@@ -234,6 +292,8 @@ void checkIds(const Project &project, Failures &failures) {
     ids.push_back(object);
   };
   walkProject(project, collect);
+  require(project.nextId <= maxNextId, Fault::IdsExhausted, projectRef,
+          failures);
   std::ranges::sort(ids, {}, &ObjectRef::id);
   const ObjectRef *previous = nullptr;
   for (const ObjectRef &object : ids) {
@@ -249,6 +309,54 @@ void checkIds(const Project &project, Failures &failures) {
 
 bool isRegular(TrackKind kind) {
   return kind == TrackKind::Audio || kind == TrackKind::Midi;
+}
+
+bool isStorableText(std::string_view text) {
+  std::size_t following = 0;
+  std::uint8_t low = continuationLow;
+  std::uint8_t high = continuationHigh;
+  for (const char character : text) {
+    const auto byte = static_cast<std::uint8_t>(character);
+    if (following > 0) {
+      if (byte < low || byte > high) {
+        return false;
+      }
+      --following;
+      low = continuationLow;
+      high = continuationHigh;
+      continue;
+    }
+    if (byte == 0) {
+      return false;
+    }
+    if (byte < 0x80) {
+      continue;
+    }
+    const Utf8Sequence sequence = sequenceFor(byte);
+    if (sequence.following == 0) {
+      return false;
+    }
+    following = sequence.following;
+    low = sequence.firstLow;
+    high = sequence.firstHigh;
+  }
+  return following == 0;
+}
+
+bool isContentHash(std::string_view text) {
+  constexpr std::string_view digits = "0123456789abcdef";
+  return text.size() == contentHashDigits &&
+         text.find_first_not_of(digits) == std::string_view::npos;
+}
+
+bool isStateRef(std::string_view text) {
+  return text.empty() ||
+         (text.ends_with(stateSuffix) &&
+          isContentHash(text.substr(0, text.size() - stateSuffix.size())));
+}
+
+bool idsAvailable(const Project &project, std::uint64_t count) {
+  return project.nextId <= maxNextId && count <= maxNextId - project.nextId;
 }
 
 bool inRange(double value, double low, double high) {
@@ -362,6 +470,7 @@ void checkClipHeader(const Clip &clip, TrackKind trackKind, bool inSlot,
   require(isStorable(clip.loop.start, clip.loop.length), Fault::ValueOutOfRange,
           self, failures);
   require(clip.colour.rgb <= maxColour, Fault::ValueOutOfRange, self, failures);
+  requireText(clip.name, self, failures);
   require(!clip.launchQuantisation.has_value() ||
               isKnown(*clip.launchQuantisation),
           Fault::ValueOutOfRange, self, failures);
@@ -400,8 +509,15 @@ void sortArrangement(std::vector<Clip> &arrangement) {
 void checkDevices(TrackKind trackKind, const std::vector<Device> &devices,
                   ObjectRef track, Failures &failures) {
   for (auto device = devices.begin(); device != devices.end(); ++device) {
-    require(isKnown(device->role), Fault::ValueOutOfRange,
-            ObjectRef{device->id}, failures);
+    const ObjectRef self{device->id};
+    require(isKnown(device->role) && isStateRef(device->stateRef),
+            Fault::ValueOutOfRange, self, failures);
+    const PluginDescriptor &plugin = device->plugin;
+    require(isStorableText(plugin.format) &&
+                isStorableText(plugin.identifier) &&
+                isStorableText(plugin.name) && isStorableText(plugin.vendor) &&
+                isStorableText(plugin.version),
+            Fault::TextInvalid, self, failures);
     const bool placementAllowed =
         device->role != DeviceRole::Instrument ||
         (trackKind == TrackKind::Midi && device == devices.begin());
@@ -414,6 +530,7 @@ void checkTrackHeader(const Project &project, const Track &track,
                       Failures &failures) {
   require(isKnown(track.kind) && track.colour.rgb <= maxColour,
           Fault::ValueOutOfRange, ObjectRef{track.id}, failures);
+  requireText(track.name, ObjectRef{track.id}, failures);
   checkMixer(project, track, failures);
 }
 
@@ -458,8 +575,14 @@ void checkTrack(const Project &project, const Track &track,
 }
 
 void checkMedia(const MediaReference &media, Failures &failures) {
-  require(!media.path.empty() && media.sampleRate >= 1, Fault::ValueOutOfRange,
-          ObjectRef{media.id}, failures);
+  require(!media.path.empty() && media.sampleRate >= 1 &&
+              isContentHash(media.contentHash),
+          Fault::ValueOutOfRange, ObjectRef{media.id}, failures);
+  requireText(media.path, ObjectRef{media.id}, failures);
+}
+
+void checkScene(const Scene &scene, Failures &failures) {
+  requireText(scene.name, ObjectRef{scene.id}, failures);
 }
 
 void checkLoopRange(const LoopRange &loop, Failures &failures) {
@@ -487,6 +610,9 @@ std::vector<Failure> validate(const Project &project) {
   detail::checkLaunchQuantisation(project.launchQuantisation, failures);
   for (const MediaReference &media : project.media) {
     detail::checkMedia(media, failures);
+  }
+  for (const Scene &scene : project.scenes) {
+    detail::checkScene(scene, failures);
   }
 
   for (const Track &track : project.tracks) {

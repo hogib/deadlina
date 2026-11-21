@@ -156,15 +156,66 @@ Built 2026-11-19, ahead of the projection.
 6. **Event loop.** The bridge registers JUCE's file descriptors with Qt's event loop, so one
    loop serves both. File descriptors registered from other threads are tolerated, not
    supported.
-7. **Known departures from the docs.** The own render path and the 0.2 second wait were
-   accepted on 2026-11-21; note ends are in "Open questions".
-   - Tracktion ends every note 0.0001 seconds early, about 5 samples at 48 kHz.
-   - A note-on is placed by the receiving plugin; Tracktion hands it a time within the block.
-     Our test instrument and Tracktion's plugin hosting round to the nearest sample.
+7. **Known departures from the docs.** The own render path and the wait below were accepted
+   on 2026-11-21.
    - Creating Tracktion's playback context waits about 0.2 seconds of wall-clock time when the
      device is driven by hand. It is created once per engine, so each engine test pays it once.
      Tracktion has a similar wait of up to 0.1 seconds when launched clips are stopped and when
      a recording is prepared.
+   - Edits built by hand in tests, without the projection, still get Tracktion's own note
+     timing: every note ends 0.0001 seconds early.
+
+## The projection as built
+
+Built 2026-11-22. Scope so far: tempo and time signature, tracks, arrangement clips (MIDI and
+audio at file speed), volume, pan, mute, solo, sends and returns, and devices through a registry
+that plugin hosting will fill. Not projected yet: session slots and launching, automation,
+controller data, the loop range and start marker, arm, monitoring and inputs, follow-tempo and
+transposition, edge fades and loop-join crossfades. Change sets that touch those are ignored
+safely.
+
+1. **One entry point.** The application hands the engine a whole project once, and after that
+   each change set together with the document after the change. While a device is open the
+   engine rebuilds its playback graph itself, once per call; nothing is left for Tracktion's
+   timer.
+2. **Time.** Ticks become beats, seconds and frames in one place, with 128-bit integer
+   arithmetic and rounding to the nearest frame. A beat is always a quarter note.
+3. **Notes are exact.** The engine's hook for playback sequences is given events generated
+   from the document's ticks, so projected notes start and end on the exact frame (settles the
+   earlier question about early note ends). A note-off is handed over 1/8 of a frame into its
+   frame and a note-on 3/8, so that where one clip ends and the next begins on the same pitch
+   the off always sorts before the on. Events are cached per clip.
+4. **Note guard.** A plugin of LINA's own sits first on every MIDI track and records the notes
+   that actually pass on the audio thread. After an edit while playing it is given the notes
+   the track now plays, and for a few blocks around the graph swap it ends any sounding note
+   that the new content does not end. It works from one pre-reserved buffer per edit and falls
+   back to "all notes off" for the track when that is not enough. It does not yet tell clip
+   notes from live notes (no live input exists before recording is built).
+5. **Mixer.** Gain is 10^(dB/20), exactly zero at silence. Pan is a constant-power balance with
+   unity gain at centre (+3.01 dB hard to one side). Both are applied by a plugin of LINA's
+   own with a 5 millisecond ramp counted in frames; Tracktion's volume and pan plugin is not
+   used. Sends are after the fader.
+6. **Audio files** are mapped synchronously when first used, so a render never holds silence
+   for a file that is not ready. Only WAV and AIFF can be played this way; other formats are
+   reported and silent until the import package converts them. A file's own sample rate wins
+   over the one the document states. The engine reports missing, unreadable, unsupported and
+   mismatched files, and clips cut short by the limit of 250,000 notes after loop unrolling.
+7. **Failure.** If an update fails part-way, the edit is rebuilt from the project and the
+   error is raised again. If the rebuild fails too, no project is loaded.
+8. **Limits of the engine.**
+   - Tracktion's timeline ends at 48 hours. Clips that start at or behind 47.5 hours do not
+     play. The document allows far more.
+   - Every edit that changes the graph makes Tracktion rebuild the whole graph. Measured in
+     an optimised build with 64 tracks, 2,560 clips and 163,840 notes: 32 to 44 ms for one
+     added note, 58 ms for a tempo change, 0.002 ms for a fader move. Doc 11's targets are
+     missed at the size of its large project.
+   - A file at another sample rate than the device is converted at play time with the
+     engine's best converter: residual about -146 dB, but the start is shifted by up to half
+     a frame depending on block size.
+9. **Test oracle.** Four kinds of generated sequences: structure compared as text after every
+   step; rendered audio compared bit for bit; one case with mismatched sample rates; and edits
+   applied while playing. Both sides of the oracle share the projection's code, so it cannot
+   see a wrong idea they share; sweeps against formulas written in the tests cover that.
 
 ## The interface (`lina_ui`, `lina_bridge`)
 
@@ -191,9 +242,9 @@ Built 2026-11-19, ahead of the projection.
 ## Open questions
 
 1. How a recovery copy is taken without stalling the main thread on a large project.
-2. Note ends. Decided 2026-11-21: the projection tries supplying exact note sequences through
-   the engine's hook for that. If that does not work without a patch, Tracktion's early
-   note-off (5 samples at 48 kHz) is accepted and docs 08 and 11 are reworded.
+2. Editing while playing misses doc 11's response targets on a large project, because
+   Tracktion rebuilds its whole graph per edit ("The projection as built", 8). Accept for the
+   first release, or look for a way round?
 3. The model finds objects by scanning and has no index by identity. Its cost on the large
    project of doc 11 is unmeasured.
 4. Undo history has no depth limit, and each removal keeps a full copy of what it removed.

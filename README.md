@@ -12,15 +12,22 @@ centre of the design. LINA is meant to fill that gap.
 **Early implementation. There is no application to run yet.**
 
 The repository holds the design documents, the project rules, the build and test scaffolding,
-and the first two libraries: the document model (musical time, tracks, clips, notes, undoable
-commands) and the engine bring-up (the playback engine driven without an audio device, rendering
-to a buffer or a file, and one event loop shared by Qt and JUCE). Nothing connects the two yet.
-All design documents are drafts.
+and four libraries:
+
+- the document model: musical time, tracks, clips, notes, undoable commands;
+- the project file format: a canonical text document, a strict reader, and safe saving with
+  backups, a recovery copy and a lock;
+- the engine: the playback engine driven without an audio device, with rendering to a buffer
+  or a file;
+- the projection: the document turned into sound, for arrangement clips and the mixer, kept up
+  to date edit by edit.
+
+There is no interface yet, and no session view. All design documents are drafts.
 
 ## Building
 
 Requirements: Linux, CMake 3.28 or newer, Ninja, GCC and Clang with C++23 support (developed with
-GCC 16 and Clang 23), Qt 6.12 (base), and the development packages for ALSA, FreeType, Fontconfig and X11.
+GCC 16 and Clang 23), Qt 6.12 (base), nlohmann/json 3.12, and the development packages for ALSA, FreeType, Fontconfig and X11.
 
 ```sh
 git clone https://github.com/hogib/LINA.git

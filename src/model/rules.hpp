@@ -8,6 +8,8 @@
 
 #include "lina/model/project.hpp"
 
+#include <cstdint>
+#include <string_view>
 #include <vector>
 
 namespace lina::model::detail {
@@ -21,6 +23,22 @@ bool isRegular(TrackKind kind);
 // negative zero, which would compare equal to zero and yet be written
 // differently.
 bool inRange(double value, double low, double high);
+
+// True for text a document may store: well-formed UTF-8 (no overlong forms,
+// no surrogates, nothing past U+10FFFF) without the character U+0000.
+bool isStorableText(std::string_view text);
+
+// True for a content hash as a media reference stores it: 64 lower-case
+// hexadecimal digits.
+bool isContentHash(std::string_view text);
+
+// True for a device's state reference: empty for "no stored state", or the
+// name of a state file, which is a content hash followed by ".bin".
+bool isStateRef(std::string_view text);
+
+// True when the document can still hand out `count` identities without its
+// counter passing `maxNextId`.
+bool idsAvailable(const Project &project, std::uint64_t count);
 
 // True when the value is one of the enumerators. A loader that casts a number
 // from a file to an enumeration relies on these through `validate`.
@@ -84,6 +102,7 @@ void checkEnvelope(const Project &project, const Track &track,
 void checkTrack(const Project &project, const Track &track, Failures &failures);
 
 void checkMedia(const MediaReference &media, Failures &failures);
+void checkScene(const Scene &scene, Failures &failures);
 void checkLoopRange(const LoopRange &loop, Failures &failures);
 void checkStartMarker(TickPosition position, Failures &failures);
 void checkLaunchQuantisation(LaunchQuantisation quantisation,

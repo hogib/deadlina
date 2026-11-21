@@ -2,9 +2,13 @@
 #ifndef LINA_ENGINE_TESTING_TEST_PLUGINS_HPP
 #define LINA_ENGINE_TESTING_TEST_PLUGINS_HPP
 
+#include "lina/engine/internal/device_registry.hpp"
+#include "lina/model/track.hpp"
+
 #include <tracktion_engine/tracktion_engine.h>
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -82,8 +86,10 @@ private:
 /// before the first delayed frame. It reports no latency, so the engine does
 /// not compensate for the delay and the shift is audible.
 ///
-/// Both values are read from the plugin's state when the playback graph is
-/// built; set them before playing or rendering.
+/// Both values are read from the plugin's state when the plugin is made
+/// ready to play; set them before playing or rendering. The gain can also be
+/// set while the plugin plays (setGain), and takes effect with the next
+/// block; the delay cannot.
 class DelayGainEffect final : public tracktion::Plugin {
 public:
   static constexpr const char *xmlTypeName = "linaTestDelayGain";
@@ -100,6 +106,10 @@ public:
   static const char *getPluginName() { return "LINA test delay and gain"; }
   static juce::ValueTree create(int delayFrames, float gain);
 
+  /// Writes the gain to the plugin's state and to the running plugin.
+  /// Message thread.
+  void setGain(float gain);
+
   juce::String getName() const override { return getPluginName(); }
   juce::String getPluginType() override { return xmlTypeName; }
   juce::String getSelectableDescription() override { return getName(); }
@@ -114,8 +124,28 @@ private:
   /// The last `delay` input frames of each channel, used as a ring.
   std::array<std::vector<float>, maxChannels> history_;
   std::size_t position_ = 0;
-  float gain_ = 1.0F;
+  std::atomic<float> gain_{1.0F};
 };
+
+/// The format under which the test plugins are known to devices of a
+/// document, with the instrument's and the effect's type names as
+/// identifiers.
+inline constexpr const char *testPluginFormat = "lina-test";
+
+/// The longest delay a device can ask of the test effect, in frames.
+inline constexpr int maxDeviceDelayFrames = 65'536;
+
+/// Devices that stand for the test plugins. The effect takes its values from
+/// two parameters, normalised as the document wants them:
+///   "delay": delay in frames = round(value * maxDeviceDelayFrames)
+///   "gain":  gain = 4 * value - 2
+/// A parameter that the device does not list is at its default: no delay,
+/// unity gain.
+model::Device toneDevice();
+model::Device delayGainDevice(int delayFrames, float gain);
+
+/// Makes the test plugins available to devices of a document.
+void registerTestDeviceBindings(internal::DeviceRegistry &registry);
 
 } // namespace lina::engine::testing
 

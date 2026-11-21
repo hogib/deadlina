@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "lina/engine/engine.hpp"
 
+#include "lina/engine/internal/device_registry.hpp"
+#include "lina/engine/internal/engine_plugins.hpp"
+#include "lina/engine/internal/projection.hpp"
 #include "lina/engine/internal/tracktion_access.hpp"
 
 #include <tracktion_engine/tracktion_engine.h>
@@ -38,17 +41,72 @@ private:
   juce::File folder_;
 };
 
-/// The engine never looks at the machine's audio devices on its own.
+/// Where LINA decides instead of the engine.
 class Behaviour final : public te::EngineBehaviour {
 public:
-  explicit Behaviour(int audioThreads) : audioThreads_(audioThreads) {}
+  /// `projection` is the one whose MIDI clips play what it says. It has to
+  /// outlive the engine that owns this object.
+  Behaviour(int audioThreads, const internal::Projection &projection)
+      : audioThreads_(audioThreads), projection_(&projection) {}
 
+  // The engine never looks at the machine's audio devices on its own.
   bool autoInitialiseDeviceManager() override { return false; }
   bool addSystemAudioIODeviceTypes() override { return false; }
   int getNumberOfCPUsToUseForAudio() override { return audioThreads_; }
 
+  // The document has no such limits (the engine's own are 400 tracks, 1500
+  // clips on a track, 16 plugins on a track and 4 on the master).
+  te::EditLimits getEditLimits() override {
+    constexpr int unlimited = 1'000'000;
+    return {
+        .maxNumTracks = unlimited,
+        .maxClipsInTrack = unlimited,
+        .maxPluginsOnClip = 0,
+        .maxPluginsOnTrack = unlimited,
+        .maxNumMasterPlugins = unlimited,
+    };
+  }
+
+  // A beat is a quarter note whatever the time signature
+  // (docs/design/04-transport-and-musical-time.md).
+  bool lengthOfOneBeatDependsOnTimeSignature() override { return false; }
+
+  // The projection places every clip itself when the tempo changes; the
+  // engine must not move anything on its own.
+  bool areAudioClipsRemappedWhenTempoChanges() override { return false; }
+  bool areAutoTempoClipsRemappedWhenTempoChanges() override { return false; }
+  bool areMidiClipsRemappedWhenTempoChanges() override { return false; }
+  bool arePluginsRemappedWhenTempoChanges() override { return false; }
+
+  // Audio clips play their file itself, never a copy the engine renders in
+  // the background, and get no fades of the engine's choosing.
+  bool autoAddClipEdgeFades() override { return false; }
+  ClipDefaults getClipDefaults() override {
+    return {
+        .useProxyFile = false,
+        .resamplingQuality = te::ResamplingQuality::lagrange,
+    };
+  }
+
+  // A MIDI clip of the projection plays the note events the projection
+  // worked out from the document; any other clip plays what the engine
+  // reads from it.
+  juce::MidiMessageSequence
+  createPlaybackMidiSequence(const te::MidiList &list, te::MidiClip &clip,
+                             te::MidiList::TimeBase timeBase,
+                             bool generateMpe) override {
+    if (timeBase == te::MidiList::TimeBase::seconds) {
+      if (auto sequence = projection_->playbackSequence(clip)) {
+        return std::move(*sequence);
+      }
+    }
+    return te::MidiList::createDefaultPlaybackMidiSequence(list, clip, timeBase,
+                                                           generateMpe);
+  }
+
 private:
   int audioThreads_;
+  const internal::Projection *projection_;
 };
 
 juce::File toJuceFile(const std::filesystem::path &path) {
@@ -165,9 +223,10 @@ void stopAndReleaseGraph(const te::Edit &edit) {
 }
 
 /// Starts the edit on the open manual device, whose format is `format`.
-void startPlayback(te::Edit &edit, const StreamFormat &format,
-                   std::int64_t startFrame) {
+void startPlayback(te::Edit &edit, internal::Projection &projection,
+                   const StreamFormat &format, std::int64_t startFrame) {
   stopAndReleaseGraph(edit);
+  projection.playbackRestarted();
   auto &transport = edit.getTransport();
   edit.dispatchPendingUpdatesSynchronously();
   transport.setPosition(toTime(startFrame, format.sampleRate));
@@ -214,9 +273,31 @@ constexpr std::int64_t fileRenderChunkFrames = 65536;
 struct Engine::Impl {
   explicit Impl(const EngineConfig &config)
       : storage(prepareStorageFolder(config.storageFolder)),
+        projection(devices),
         engine(std::make_unique<FolderPropertyStorage>(storage), nullptr,
-               std::make_unique<Behaviour>(std::max(1, config.audioThreads))),
-        edit(createEdit(engine, storage)) {}
+               std::make_unique<Behaviour>(std::max(1, config.audioThreads),
+                                           projection)),
+        edit(createEdit(engine, storage)) {
+    auto &plugins = engine.getPluginManager();
+    plugins.createBuiltInType<internal::StripGainPlugin>();
+    plugins.createBuiltInType<internal::PlaceholderPlugin>();
+    plugins.createBuiltInType<internal::NoteGuardPlugin>();
+    projection.attach(*edit);
+  }
+
+  /// Makes the playback graph match the edit now, if the engine or the
+  /// projection says it is out of date, and leaves nothing for the engine's
+  /// own timer to do.
+  void syncAfterEdit() {
+    if (!device) {
+      return;
+    }
+    if (projection.takeGraphStale()) {
+      edit->restartPlayback();
+    }
+    edit->dispatchPendingUpdatesSynchronously();
+    projection.graphHandedOver();
+  }
 
   void openDevice(const StreamFormat &format);
   void closeDevice();
@@ -227,6 +308,11 @@ struct Engine::Impl {
   class RenderDevice;
 
   juce::File storage;
+  internal::DeviceRegistry devices;
+  /// Declared before the engine, which asks it for the events of MIDI
+  /// clips: it is there for as long as the engine is. The engine objects it
+  /// holds are let go before the edit is destroyed (~Engine).
+  internal::Projection projection;
   te::Engine engine;
   std::unique_ptr<te::Edit> edit;
   std::optional<StreamFormat> device;
@@ -278,6 +364,8 @@ void Engine::Impl::openDevice(const StreamFormat &format) {
   devices.setCpuLimitBeforeMuting(std::numeric_limits<double>::max());
 
   device = format;
+  // Clips sit on the sample grid of the device that plays them.
+  projection.setSampleRate(format.sampleRate);
 }
 
 void Engine::Impl::closeDevice() {
@@ -304,7 +392,42 @@ Engine::Engine(const EngineConfig &config)
 
 Engine::~Engine() {
   impl_->closeDevice();
+  impl_->projection.releaseEngineObjects();
   impl_->edit.reset();
+}
+
+void Engine::setProject(const model::Project &project,
+                        const std::filesystem::path &mediaFolder) {
+  requireMessageThread("Engine::setProject");
+  try {
+    impl_->projection.build(project, mediaFolder);
+  } catch (...) {
+    impl_->syncAfterEdit();
+    throw;
+  }
+  impl_->syncAfterEdit();
+}
+
+void Engine::applyChanges(const model::Project &project,
+                          const model::ChangeSet &changes) {
+  requireMessageThread("Engine::applyChanges");
+  try {
+    impl_->projection.apply(project, changes);
+  } catch (...) {
+    impl_->syncAfterEdit();
+    throw;
+  }
+  impl_->syncAfterEdit();
+}
+
+bool Engine::hasProject() const { return impl_->projection.isBuilt(); }
+
+std::vector<MediaReport> Engine::mediaProblems() const {
+  return impl_->projection.mediaProblems();
+}
+
+std::vector<model::ClipId> Engine::truncatedClips() const {
+  return impl_->projection.truncatedClips();
 }
 
 void Engine::openManualDevice(const StreamFormat &format) {
@@ -326,7 +449,7 @@ void Engine::play(std::int64_t startFrame) {
   if (startFrame < 0) {
     throw std::invalid_argument("Engine::play: negative start frame");
   }
-  startPlayback(*impl_->edit, format, startFrame);
+  startPlayback(*impl_->edit, impl_->projection, format, startFrame);
 }
 
 void Engine::stop() {
@@ -346,6 +469,8 @@ void Engine::syncGraph() {
   // second does the timer's work and stops it.
   impl_->edit->restartPlayback();
   impl_->edit->dispatchPendingUpdatesSynchronously();
+  std::ignore = impl_->projection.takeGraphStale();
+  impl_->projection.graphHandedOver();
 }
 
 AudioBuffer Engine::process(std::int64_t frameCount) {
@@ -361,7 +486,8 @@ AudioBuffer Engine::renderOffline(const RenderRequest &request) {
   requireMessageThread("Engine::renderOffline");
   validate(request);
   const Impl::RenderDevice device(*impl_, request.format);
-  startPlayback(*impl_->edit, request.format, request.startFrame);
+  startPlayback(*impl_->edit, impl_->projection, request.format,
+                request.startFrame);
   return runDevice(impl_->engine, request.format, request.frameCount);
 }
 
@@ -409,7 +535,8 @@ Engine::renderToWavFile(const RenderRequest &request,
 
   {
     const Impl::RenderDevice device(*impl_, request.format);
-    startPlayback(*impl_->edit, request.format, request.startFrame);
+    startPlayback(*impl_->edit, impl_->projection, request.format,
+                  request.startFrame);
     for (std::int64_t left = request.frameCount; left > 0;) {
       const auto count = std::min(left, fileRenderChunkFrames);
       const auto audio = runDevice(impl_->engine, request.format, count);
@@ -454,6 +581,14 @@ tracktion::Engine &TracktionAccess::engine(Engine &engine) {
 
 tracktion::Edit &TracktionAccess::edit(Engine &engine) {
   return *engine.impl_->edit;
+}
+
+DeviceRegistry &TracktionAccess::devices(Engine &engine) {
+  return engine.impl_->devices;
+}
+
+const Projection &TracktionAccess::projection(Engine &engine) {
+  return engine.impl_->projection;
 }
 
 } // namespace internal

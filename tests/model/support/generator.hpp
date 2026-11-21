@@ -14,13 +14,30 @@
 #include <cstddef>
 #include <cstdint>
 #include <random>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace lina::model::testing {
 
+// What generated commands refer to, for tiers that play what the generator
+// builds. Each list that is not empty takes the place of the made-up values
+// the generator otherwise uses. No option changes how many numbers are drawn:
+// a seed gives the same sequence of command kinds with and without options.
+struct GeneratorOptions {
+  // New instruments and effects are copies of these.
+  std::vector<Device> instruments;
+  std::vector<Device> effects;
+  // Media references are added with, and relinked to, these paths.
+  std::vector<std::string> mediaPaths;
+  // Parameter settings name these parameters.
+  std::vector<std::string> parameterIds;
+};
+
 class CommandGenerator {
 public:
-  explicit CommandGenerator(std::uint64_t seed) : engine_(seed) {}
+  explicit CommandGenerator(std::uint64_t seed, GeneratorOptions options = {})
+      : engine_(seed), options_(std::move(options)) {}
 
   // A command aimed at the project as it is now. About two in three apply;
   // the rest are meant not to (unknown identities, identities where the
@@ -68,12 +85,17 @@ private:
   ClipId anyClip(const Project &project);
 
   Clip clip(const Project &project, TrackKind kind);
+  // A new device, and the parameter a setting names: made up, or taken from
+  // the options.
+  Device newDevice();
+  std::string parameterId();
   std::vector<Note> notes(std::size_t count);
   ClipContainer container(const Project &project);
   TrackInput input();
   std::vector<AutomationPoint> points(double low, double high);
 
   std::mt19937_64 engine_;
+  GeneratorOptions options_;
   std::uint64_t named_{0};
 };
 

@@ -300,8 +300,15 @@ Command CommandGenerator::projectCommand() {
 Command CommandGenerator::mediaCommand(const Project &project) {
   const std::uint64_t choice = below(4);
   if (project.media.empty() || choice < 2) {
-    MediaReference media = makeMedia(
-        rarely(20) ? "" : "media/file" + std::to_string(named_++) + ".wav");
+    const bool blank = rarely(20);
+    std::string path;
+    if (!blank) {
+      const std::uint64_t number = named_++;
+      path = options_.mediaPaths.empty()
+                 ? "media/file" + std::to_string(number) + ".wav"
+                 : options_.mediaPaths.at(number % options_.mediaPaths.size());
+    }
+    MediaReference media = makeMedia(std::move(path));
     if (rarely(20)) {
       media.id = MediaId{below(project.nextId + 3)};
     }
@@ -313,10 +320,15 @@ Command CommandGenerator::mediaCommand(const Project &project) {
   if (choice == 2) {
     return RemoveMedia{media};
   }
-  return RelinkMedia{
-      .media = media,
-      .path = rarely(15) ? "" : "elsewhere/" + std::to_string(named_++),
-  };
+  const bool blank = rarely(15);
+  std::string path;
+  if (!blank) {
+    const std::uint64_t number = named_++;
+    path = options_.mediaPaths.empty()
+               ? "elsewhere/" + std::to_string(number)
+               : options_.mediaPaths.at(number % options_.mediaPaths.size());
+  }
+  return RelinkMedia{.media = media, .path = std::move(path)};
 }
 
 Command CommandGenerator::sceneCommand(const Project &project) {
@@ -579,6 +591,28 @@ Command CommandGenerator::controllerCommand(const Project &project) {
   return SetControllerData{.clip = id, .data = std::move(data)};
 }
 
+Device CommandGenerator::newDevice() {
+  const std::uint64_t number = named_++;
+  const std::string name = "plugin " + std::to_string(number);
+  const bool instrument = below(4) == 0;
+  const std::vector<Device> &palette =
+      instrument ? options_.instruments : options_.effects;
+  if (!palette.empty()) {
+    return palette.at(number % palette.size());
+  }
+  return instrument ? makeInstrument(name) : makeEffect(name);
+}
+
+std::string CommandGenerator::parameterId() {
+  if (rarely(20)) {
+    return "";
+  }
+  const std::uint64_t number = below(4);
+  return options_.parameterIds.empty()
+             ? "p" + std::to_string(number)
+             : options_.parameterIds.at(number % options_.parameterIds.size());
+}
+
 Command CommandGenerator::deviceCommand(const Project &project) {
   const std::vector<const Device *> devices = allDevices(project);
   const std::uint64_t choice = below(7);
@@ -586,8 +620,7 @@ Command CommandGenerator::deviceCommand(const Project &project) {
     const TrackId track = anyTrack(project);
     const Track *found = findTrack(project, track);
     const std::size_t count = found != nullptr ? found->devices.size() : 0;
-    const std::string name = "plugin " + std::to_string(named_++);
-    Device device = below(4) == 0 ? makeInstrument(name) : makeEffect(name);
+    Device device = newDevice();
     if (rarely(30)) {
       device.role = enumerator<DeviceRole>(2);
     }
@@ -633,15 +666,20 @@ Command CommandGenerator::deviceCommand(const Project &project) {
   case 0:
     return set(BypassedValue{below(2) == 0});
   case 1:
-    return set(StateValue{"state" + std::to_string(below(4)) + ".bin"});
-  default:
+    // The name of a state file: a content hash, here one of four made-up
+    // ones, and ".bin".
+    return set(
+        StateValue{std::string(63, '0') + std::to_string(below(4)) + ".bin"});
+  default: {
+    std::string parameter = parameterId();
     return set(ParameterSettingValue{
         {
-            .id = rarely(20) ? "" : "p" + std::to_string(below(4)),
+            .id = std::move(parameter),
             .value =
                 below(3) == 0 ? std::nullopt : std::optional{level(0.0, 1.0)},
         },
     });
+  }
   }
 }
 

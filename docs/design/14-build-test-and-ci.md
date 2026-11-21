@@ -21,7 +21,7 @@ Status: **draft**. Stack-dependent. This doc turns the testing and maintainabili
 | Tracktion Engine v3.2.0, with JUCE 8.0.6 as its submodule | Git submodule pinned to the release tag | Decided 2026-11-13 |
 | Qt 6.12 LTS (Core, Gui, Qml, Quick, QuickControls2, QuickTest) | System packages | Decided as a dependency |
 | Catch2 | System package if present, otherwise fetched by CMake at v3.16.1, pinned by commit | Approved in `CLAUDE.md` |
-| nlohmann/json | System package or pinned fetch; parsing only (doc 16) | Approved 2026-11-13 |
+| nlohmann/json | System package, 3.12 or newer; parsing only (doc 16) | Approved 2026-11-13 |
 | SoundTouch | Bundled with Tracktion Engine | Decided 2026-11-13 as the time-stretch backend |
 
 - JUCE and Tracktion compile once into a static library with their warnings silenced, and are
@@ -113,6 +113,15 @@ reconsidered if its quality turns out not to be good enough.
     long deadline. No test measures elapsed time.
   - Tracktion waits about 0.2 seconds when its playback context is created under a device
     driven by hand (doc 13). No test result depends on it.
+- A fuzz target for the project file reader is built when `LINA_BUILD_FUZZERS` is on (Clang
+  only). It is not part of the gating suite; its seed corpus is replayed by an ordinary test.
+- Longer runs outside the gating suite: `LINA_PROJECTION_SOAK=<n>` multiplies the projection
+  oracle's sequences; `lina_projection_bench` measures edits on a large project.
+- `LINA_UPDATE_AUDIO_REFS=1` rewrites the reference audio and fails the test on purpose.
+  `tests/audio-refs/tone.flac` was made with `flac --best` from a 0.25 second 1 kHz tone at
+  48 kHz, 16 bit; JUCE's bundled FLAC encoder trips UBSan and is not used in tests.
+- ThreadSanitizer: one suppression, in the engine tests' support code, for a write-only static
+  inside JUCE's memory-mapped reader that two engines in one process both touch.
 - Engine and bridge tests set `HOME` and `TMPDIR` to a scratch folder and unset `DISPLAY`
   themselves, so a test binary run by hand behaves as it does under CTest.
 - Reference audio comparisons state their tolerance per test. A test that depends on a

@@ -6,6 +6,7 @@
 lina_add_library(lina_engine_testing
   SOURCES
     edit_building.cpp
+    projection_support.cpp
     test_environment.cpp
     test_plugins.cpp
   PUBLIC_LIBRARIES

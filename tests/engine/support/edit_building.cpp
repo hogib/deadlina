@@ -25,6 +25,7 @@ void registerTestPlugins(Engine &engine) {
   auto &plugins = internal::TracktionAccess::engine(engine).getPluginManager();
   plugins.createBuiltInType<ToneInstrument>();
   plugins.createBuiltInType<DelayGainEffect>();
+  registerTestDeviceBindings(internal::TracktionAccess::devices(engine));
 }
 
 void setTempo(Engine &engine, double bpm) {

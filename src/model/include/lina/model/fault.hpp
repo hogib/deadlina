@@ -55,6 +55,11 @@ enum class Fault : std::uint8_t {
   // The track's kind does not take this input: a MIDI device on an audio track,
   // any input on a return track or the master.
   WrongInputKind,
+  // The identity counter has reached `maxNextId`: the document cannot hand
+  // out the identities a command needs, or holds a counter past that limit.
+  IdsExhausted,
+  // A text is not well-formed UTF-8, or holds the character U+0000.
+  TextInvalid,
   // A command was applied with no transaction open.
   NoTransaction,
   // Begin, undo or redo was asked for while a transaction is open.

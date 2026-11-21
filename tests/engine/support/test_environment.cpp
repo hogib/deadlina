@@ -6,6 +6,27 @@
 #include <print>
 #include <stdexcept>
 
+#ifdef __has_feature
+#if __has_feature(thread_sanitizer)
+// ThreadSanitizer reads its suppressions from this function when a test
+// executable defines it. One race in third-party code is suppressed, for
+// engine tests only:
+//
+//   JUCE 8.0.6, juce_AudioFormatReader.cpp:440. Every engine has a thread
+//   that touches the pages of the audio files it has mapped, and
+//   MemoryMappedAudioFormatReader::touchSample adds each byte it reads to
+//   one static int, `memoryReadDummyVariable`, whose only purpose is to
+//   keep the compiler from dropping the read. Two engines in one process
+//   that both play audio files, which only tests have, write it from two
+//   threads. The value is never used.
+//
+// NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp,readability-identifier-naming)
+extern "C" const char *__tsan_default_suppressions() {
+  return "race:juce::MemoryMappedAudioFormatReader::touchSample\n";
+}
+#endif
+#endif
+
 namespace lina::engine::testing {
 
 AssertionCounter::AssertionCounter() { juce::Logger::setCurrentLogger(this); }

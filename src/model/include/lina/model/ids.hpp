@@ -27,6 +27,12 @@ enum class ObjectKind : std::uint8_t {
   Note,
 };
 
+// The largest value the identity counter of a document may have: 2^62. A
+// document that created a million objects a second would need more than a
+// hundred thousand years to get there, and the limit leaves the counter far
+// from where a 64-bit number wraps round.
+inline constexpr std::uint64_t maxNextId = std::uint64_t{1} << 62U;
+
 // The identity of one object of kind `Kind`. Zero means "not assigned".
 template <ObjectKind Kind> struct Id {
   std::uint64_t value{0};

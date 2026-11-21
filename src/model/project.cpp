@@ -43,6 +43,10 @@ std::string_view faultName(Fault fault) {
     return "envelope-target";
   case Fault::WrongInputKind:
     return "wrong-input-kind";
+  case Fault::IdsExhausted:
+    return "ids-exhausted";
+  case Fault::TextInvalid:
+    return "text-invalid";
   case Fault::NoTransaction:
     return "no-transaction";
   case Fault::TransactionOpen:

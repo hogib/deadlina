@@ -3,12 +3,16 @@
 #define LINA_ENGINE_ENGINE_HPP
 
 #include "lina/engine/audio_buffer.hpp"
+#include "lina/engine/project_report.hpp"
+#include "lina/model/change_set.hpp"
+#include "lina/model/project.hpp"
 
 #include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace lina::engine {
 
@@ -79,6 +83,65 @@ public:
   Engine(Engine &&) = delete;
   Engine &operator=(Engine &&) = delete;
 
+  /// Makes the engine play `project`: empties the edit and builds it anew
+  /// from the document (docs/design/13-architecture.md, "The projection").
+  /// The engine keeps no reference to `project`. A media reference with a
+  /// relative path is looked for in `mediaFolder`, which must be an absolute
+  /// path (std::invalid_argument otherwise).
+  ///
+  /// What is played of a document: the tempo, audio, MIDI and return tracks
+  /// and the master with volume, pan, mute, solo and sends, devices whose
+  /// plugin the engine knows (any other passes its input through), and
+  /// arrangement clips. Audio clips play at the speed of their file,
+  /// whether or not they ask to follow the tempo. Session clips, automation
+  /// and controller data are not played yet.
+  ///
+  /// With a manual device open, the playback graph is brought up to date
+  /// before this returns, as after applyChanges().
+  ///
+  /// `project` must keep the document's rules (model::validate), as the
+  /// project of a Document always does. Where the engine depends on a rule
+  /// that is broken, this throws std::invalid_argument. Whatever is thrown,
+  /// the engine then has no project and an empty edit.
+  void setProject(const model::Project &project,
+                  const std::filesystem::path &mediaFolder);
+
+  /// Brings the edit in step with an edit of the document. `changes` is
+  /// what Document::apply, commit, undo or redo returned, and `project` the
+  /// document after it; every change set must be passed on, in order.
+  ///
+  /// The call is complete in itself. With a manual device open, the
+  /// playback graph is up to date when it returns: a stream that is playing
+  /// goes on with the changed document from the next block, a note that the
+  /// edit left without an end is ended, and nothing is left for the engine
+  /// to do later from a timer. Without a device the edit is brought in step
+  /// and the graph is built when playback starts.
+  ///
+  /// Throws std::logic_error before setProject(). Every other exception
+  /// means that a part of the program the engine relies on is broken (a
+  /// plugin binding that throws or names a plugin that cannot be made, a
+  /// project that breaks the document's rules). The engine then rebuilds
+  /// the edit from `project` and throws the exception again; if the rebuild
+  /// fails as well, the engine has no project and an empty edit, which
+  /// hasProject() tells.
+  void applyChanges(const model::Project &project,
+                    const model::ChangeSet &changes);
+
+  /// True while the engine plays a project: after a setProject() that did
+  /// not throw, until a failure leaves the engine without one.
+  [[nodiscard]] bool hasProject() const;
+
+  /// The media references of arrangement clips whose file is not as the
+  /// document says: missing, not audio, in a format that is not played, or
+  /// at another sample rate than the reference states. A file is looked at
+  /// when a clip first uses its path, not again later.
+  [[nodiscard]] std::vector<MediaReport> mediaProblems() const;
+
+  /// The MIDI clips of the arrangement that would play more notes than the
+  /// engine plays of one clip (250,000, counting every repetition of a
+  /// loop) and are silent from there on.
+  [[nodiscard]] std::vector<model::ClipId> truncatedClips() const;
+
   /// Attaches the edit to a device that produces audio only when process() is
   /// called. Replaces a manual device that is already open. Playback is
   /// stopped afterwards.
@@ -112,6 +175,9 @@ public:
   /// edit keeps its state. The new graph is in use from the next block that
   /// process() runs. Needs a manual device; before the first play() there is
   /// no graph yet and nothing to do.
+  ///
+  /// For edits made to the engine's edit by hand. setProject() and
+  /// applyChanges() do this themselves.
   ///
   /// The engine does the same on its own some time after an edit changes,
   /// from a timer on the message thread; this does it now, and that timer

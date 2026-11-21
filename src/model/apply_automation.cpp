@@ -29,6 +29,9 @@ Result applyOne(Project &project, const AddEnvelope &command) {
   if (targetTaken) {
     return fail(Fault::EnvelopeTarget, trackRef);
   }
+  if (!idsAvailable(project, 1)) {
+    return fail(Fault::IdsExhausted, trackRef);
+  }
 
   envelope.id = EnvelopeId{project.nextId++};
   Applied applied{

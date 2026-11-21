@@ -107,3 +107,11 @@ release that knowledge is a single number per clip.
 2. Which compressed formats must import in the first release?
 3. Tempo detection estimates a tempo; it does not find where bar one starts. Is it enough for the
    first release that the user trims the clip start to the downbeat by hand?
+4. As built 2026-11-22, to decide: a file whose sample rate differs from the device's is
+   converted while playing. The result is clean, but its start shifts by up to half a sample
+   depending on the audio block size, so playback is not exactly repeatable across block sizes.
+   Converting such files to the project's rate on import would remove that. Proposed: convert
+   on import.
+5. As built 2026-11-22: clip edges and loop joins are hard cuts; the fades of doc 06 and the
+   loop-join crossfade above are not built yet. Formats other than WAV and AIFF do not play
+   until import converts them.

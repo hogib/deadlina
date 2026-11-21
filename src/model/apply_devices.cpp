@@ -132,6 +132,9 @@ Result setParameter(const DeviceSite<Track> &site, ParameterSetting wanted) {
   if (wanted.id.empty() || !valueAllowed) {
     return fail(Fault::ValueOutOfRange, self);
   }
+  if (!isStorableText(wanted.id)) {
+    return fail(Fault::TextInvalid, self);
+  }
   const auto at = std::ranges::lower_bound(device.parameters, wanted.id, {},
                                            &ParameterValue::id);
   const bool stored = at != device.parameters.end() && at->id == wanted.id;
@@ -165,6 +168,9 @@ Result setProperty(const DeviceSite<Track> &site, const BypassedValue &wanted) {
   return setDeviceField(site, site.device->bypassed, wanted);
 }
 Result setProperty(const DeviceSite<Track> &site, const StateValue &wanted) {
+  if (!isStateRef(wanted.value)) {
+    return fail(Fault::ValueOutOfRange, ObjectRef{site.device->id});
+  }
   return setDeviceField(site, site.device->stateRef, wanted);
 }
 Result setProperty(const DeviceSite<Track> &site,
@@ -195,6 +201,9 @@ Result applyOne(Project &project, const AddDevice &command) {
   auto chain = chainWith(*track, device, command.index);
   if (!chain.has_value()) {
     return std::unexpected(chain.error());
+  }
+  if (!idsAvailable(project, 1)) {
+    return fail(Fault::IdsExhausted, trackRef);
   }
   const DeviceId id{project.nextId++};
   iteratorAt(*chain, command.index)->id = id;

@@ -22,7 +22,9 @@ struct Note {
 };
 
 /// Makes the test instrument and the test effect available to the engine's
-/// edit. Call once per Engine, before adding either to a track.
+/// edit, and to devices of a document that name them (test_plugins.hpp).
+/// Call once per Engine, before adding either to a track and before setting
+/// a project.
 void registerTestPlugins(Engine &engine);
 
 /// Sets the single tempo of the engine's edit, in quarter notes per minute.

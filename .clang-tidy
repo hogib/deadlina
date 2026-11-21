@@ -14,6 +14,7 @@ Checks: >
   -cppcoreguidelines-avoid-magic-numbers,
   misc-*,
   -misc-include-cleaner,
+  -misc-no-recursion,
   modernize-*,
   -modernize-use-trailing-return-type,
   performance-*,

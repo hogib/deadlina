@@ -114,3 +114,7 @@ input or clip playback → clip gain → device chain → volume and pan → out
 6. A track's input is stored without depending on a device being present: an audio input by
    channel number, mono or stereo; a MIDI input as "all" or one device by the name the system
    reports. A device that is missing is kept as stored. Decided 2026-11-21.
+7. As built 2026-11-22, to confirm: pan is a constant-power balance with unity gain at centre,
+   so a signal panned hard to one side is 3 dB louder on that side. Solo on a return track
+   silences the other returns and the direct output of tracks that are not soloed, while their
+   sends keep feeding; solo on a track never silences returns.

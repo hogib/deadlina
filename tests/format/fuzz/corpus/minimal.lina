@@ -1,0 +1,80 @@
+{
+  "format": 1,
+  "written_by": "LINA tests 1",
+  "next_id": 8,
+  "tempo": 120.0,
+  "time_signature": [4, 4],
+  "loop": { "enabled": false, "start": 0, "length": 241920 },
+  "start_marker": 0,
+  "launch_quantisation": "1_bar",
+  "media": [],
+  "scenes": [
+    { "id": 2, "name": "Intro" }
+  ],
+  "tracks": [
+    {
+      "id": 3,
+      "kind": "midi",
+      "name": "Keys",
+      "colour": "#808080",
+      "mixer": {
+        "volume_db": 0.0,
+        "pan": 0.0,
+        "mute": false,
+        "solo": false,
+        "armed": false,
+        "monitoring": "auto",
+        "input": { "type": "all_midi" },
+        "sends": []
+      },
+      "devices": [],
+      "slots": [
+        {
+          "id": 4,
+          "scene": 2,
+          "clip": {
+            "id": 5,
+            "name": "two notes",
+            "colour": "#808080",
+            "position": 0,
+            "length": 60480,
+            "content_start": 0,
+            "loop": { "enabled": false, "start": 0, "length": 60480 },
+            "launch_quantisation": null,
+            "content": {
+              "type": "midi",
+              "notes": [
+                { "id": 6, "start": 0, "length": 15120, "pitch": 60, "velocity": 100 },
+                { "id": 7, "start": 15120, "length": 30240, "pitch": 64, "velocity": 90 }
+              ],
+              "controllers": []
+            }
+          }
+        }
+      ],
+      "arrangement": [],
+      "automation": []
+    }
+  ],
+  "returns": [],
+  "master": {
+    "id": 1,
+    "kind": "master",
+    "name": "Master",
+    "colour": "#808080",
+    "mixer": {
+      "volume_db": 0.0,
+      "pan": 0.0,
+      "mute": false,
+      "solo": false,
+      "armed": false,
+      "monitoring": "auto",
+      "input": { "type": "none" },
+      "sends": []
+    },
+    "devices": [],
+    "slots": [],
+    "arrangement": [],
+    "automation": []
+  }
+}

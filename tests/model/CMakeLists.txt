@@ -24,6 +24,7 @@ lina_add_catch_test(lina_model_tests
     note_command_test.cpp
     project_command_test.cpp
     property_test.cpp
+    storable_rules_test.cpp
     time_test.cpp
     track_command_test.cpp
     validate_test.cpp

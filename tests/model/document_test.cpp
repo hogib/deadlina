@@ -426,6 +426,7 @@ TEST_CASE("every fault has its own name", "[model][document]") {
       Fault::SlotsMismatch,   Fault::SendsMismatch,   Fault::OrderViolation,
       Fault::EnvelopeTarget,  Fault::WrongInputKind,  Fault::NoTransaction,
       Fault::TransactionOpen, Fault::NothingToUndo,   Fault::NothingToRedo,
+      Fault::IdsExhausted,    Fault::TextInvalid,
   };
   std::set<std::string_view> names;
   for (const Fault fault : faults) {

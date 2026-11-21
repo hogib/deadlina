@@ -61,7 +61,8 @@ MediaReference makeMedia(std::string path) {
       .id = MediaId{0},
       .path = std::move(path),
       .sizeBytes = 1'024,
-      .contentHash = "00ff",
+      .contentHash =
+          "00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff",
       .sampleRate = 48'000,
   };
 }

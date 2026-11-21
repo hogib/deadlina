@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <numbers>
 #include <span>
 
@@ -25,7 +26,80 @@ int frameOf(const juce::MidiMessage &message, double sampleRate, int frameCount)
   return std::clamp(frame, 0, frameCount - 1);
 }
 
+constexpr const char *delayParameter = "delay";
+constexpr const char *gainParameter = "gain";
+
+class ToneBinding final : public internal::DeviceBinding {
+public:
+  [[nodiscard]] juce::ValueTree
+  createState([[maybe_unused]] const model::Device &device) const override {
+    return ToneInstrument::create();
+  }
+  void apply([[maybe_unused]] te::Plugin &plugin,
+             [[maybe_unused]] const model::Device &device) const override {}
+};
+
+class DelayGainBinding final : public internal::DeviceBinding {
+public:
+  [[nodiscard]] juce::ValueTree
+  createState([[maybe_unused]] const model::Device &device) const override {
+    return DelayGainEffect::create(0, 1.0F);
+  }
+  void apply(te::Plugin &plugin, const model::Device &device) const override {
+    int delayFrames = 0;
+    float gain = 1.0F;
+    for (const model::ParameterValue &parameter : device.parameters) {
+      if (parameter.id == delayParameter) {
+        delayFrames = static_cast<int>(
+            std::lround(parameter.value * maxDeviceDelayFrames));
+      } else if (parameter.id == gainParameter) {
+        gain = static_cast<float>((4.0 * parameter.value) - 2.0);
+      }
+    }
+    plugin.state.setProperty(juce::Identifier(delayFramesProperty), delayFrames,
+                             nullptr);
+    dynamic_cast<DelayGainEffect &>(plugin).setGain(gain);
+  }
+};
+
+model::Device testDevice(model::DeviceRole role, const char *identifier) {
+  model::Device device;
+  device.role = role;
+  device.plugin = {
+      .format = testPluginFormat,
+      .identifier = identifier,
+      .name = identifier,
+      .vendor = "LINA tests",
+      .version = "1",
+  };
+  return device;
+}
+
 } // namespace
+
+model::Device toneDevice() {
+  return testDevice(model::DeviceRole::Instrument, ToneInstrument::xmlTypeName);
+}
+
+model::Device delayGainDevice(int delayFrames, float gain) {
+  model::Device device =
+      testDevice(model::DeviceRole::AudioEffect, DelayGainEffect::xmlTypeName);
+  device.parameters = {
+      {
+          .id = delayParameter,
+          .value = static_cast<double>(delayFrames) / maxDeviceDelayFrames,
+      },
+      {.id = gainParameter, .value = (static_cast<double>(gain) + 2.0) / 4.0},
+  };
+  return device;
+}
+
+void registerTestDeviceBindings(internal::DeviceRegistry &registry) {
+  registry.add(testPluginFormat, ToneInstrument::xmlTypeName,
+               std::make_unique<ToneBinding>());
+  registry.add(testPluginFormat, DelayGainEffect::xmlTypeName,
+               std::make_unique<DelayGainBinding>());
+}
 
 ToneInstrument::ToneInstrument(const te::PluginCreationInfo &info)
     : Plugin(info) {}
@@ -147,6 +221,11 @@ void DelayGainEffect::initialise(
   position_ = 0;
 }
 
+void DelayGainEffect::setGain(float gain) {
+  state.setProperty(juce::Identifier(gainProperty), gain, nullptr);
+  gain_.store(gain);
+}
+
 void DelayGainEffect::deinitialise() { reset(); }
 
 void DelayGainEffect::reset() {
@@ -166,6 +245,7 @@ void DelayGainEffect::applyToBuffer(const te::PluginRenderContext &context)
       std::min(static_cast<std::size_t>(buffer.getNumChannels()), maxChannels);
   const auto frameCount = static_cast<std::size_t>(context.bufferNumSamples);
   std::size_t position = position_;
+  const float gain = gain_.load();
   for (std::size_t channel = 0; channel < channelCount; ++channel) {
     // at() checks the index and never fails here: `channel` is below
     // maxChannels and `position` below the length of the history.
@@ -181,7 +261,7 @@ void DelayGainEffect::applyToBuffer(const te::PluginRenderContext &context)
         history.at(position) = sample;
         position = (position + 1) % history.size();
       }
-      sample = gain_ * delayed;
+      sample = gain * delayed;
     }
   }
   position_ = position;

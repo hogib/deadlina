@@ -43,9 +43,11 @@ are `[own design]`.
 
 ## Fidelity
 
-1. **(R1)** Loading a project and saving it again without changes produces a byte-identical
-   document. The saved form therefore contains no timestamps, no random identifiers generated at
-   save time, and no ordering that depends on memory layout.
+1. **(R1)** Loading a project and saving it again without changes, with the same version of
+   LINA, produces a byte-identical document. The saved form therefore contains no timestamps, no
+   random identifiers generated at save time, and no ordering that depends on memory layout.
+   (The document names the application version that wrote it, doc 16; saving with another
+   version changes that one line.)
 2. **(R1)** Save, load, save round-trips the complete document model: every property in docs 03
    to 09 that the user can set is either saved or explicitly listed as session-only.
 3. **(R1)** Session-only state, not saved: undo history, selection, which clips are playing,
@@ -61,17 +63,28 @@ are `[own design]`.
 1. **(R1)** The project document is text that a person can read and that a version control
    system can compare meaningfully: one property per line where practical, stable ordering.
    Decided 2026-11-13.
-2. **(R1)** A plugin's saved state is opaque data from the plugin and is the one exception; it is
-   stored as an encoded block, together with the plugin's format, identifier, name, vendor and
-   version so that a missing plugin can be named (doc 09).
+2. **(R1)** A plugin's saved state is opaque data from the plugin and is the one exception. It is
+   kept out of the text document, in a file of its own inside the project folder that the
+   document refers to (doc 16). The document itself holds the plugin's format, identifier, name,
+   vendor and version, so that a missing plugin can be named (doc 09).
 
 ## Safety of saving
 
 1. **(R1)** Saving never leaves a half-written project. The new document is written completely
    beside the old one and then swapped in. A crash or power loss during a save leaves either the
    old project or the new one intact.
-2. **(R1)** The previous saved document is kept as a backup until the next successful save.
+2. **(R1)** The previous saved document is kept as a backup until the next successful save. A
+   save that fails leaves the backup that was there untouched.
 3. **(R1)** If two running copies of LINA open the same project, the second is warned.
+4. **(R1)** What is saved can be loaded: a document is checked before it is written, and a save
+   that would produce a document LINA could not reopen is refused instead.
+5. **(R1)** Files that an open project may still need are not deleted behind its back: plugin
+   state that only the undo history refers to stays until the session says it is done with it
+   (doc 16, "Plugin state").
+6. **(R1)** A project with missing files can be saved ("Media references" 3). When a save finds
+   that the document refers to a plugin state file, or to a media file inside the project
+   folder, that is not there, it saves all the same and the user is told which files are
+   missing; it is never silent.
 
 ## Crash recovery
 
@@ -79,8 +92,9 @@ are `[own design]`.
    it, without interrupting audio and without the user noticing. *Proposed* interval: at most
    one minute of work can be lost.
 2. **(R1)** After a crash, opening the project offers the recovery copy and shows when it was
-   written. Declining keeps the last saved version; the recovery copy is not deleted until the
-   user saves.
+   written. It is offered whenever it differs from the saved document; the times of the files
+   are shown, not relied on. Declining keeps the last saved version; the recovery copy is not
+   deleted until the user saves.
 3. **(R1)** Audio being recorded is written to disk continuously and is recoverable up to the
    last few seconds, even if the project itself was never saved (doc 05).
 4. Later: recovery that replays every edit since the last save, so that nothing is lost.
@@ -89,15 +103,19 @@ are `[own design]`.
 
 1. **(R1)** Opening a project never runs code contained in it. A project from a stranger can do
    no more than load the plugins it names, which the user already has installed.
-2. **(R1)** A malformed or hostile project document produces an error message, never a crash.
-   The loader is tested with deliberately damaged input.
-3. **(R1)** File references in a project cannot make LINA write outside the project folder.
+2. **(R1)** A malformed or hostile project document produces an error message, never a crash,
+   and cannot make LINA use memory without limit: documents beyond a fixed size are refused
+   (doc 16). The loader is tested with deliberately damaged input.
+3. **(R1)** File references in a project cannot make LINA write outside the project folder, and
+   LINA does not read or replace its own files through symbolic links placed in the folder.
 
 ## Privacy
 
 1. **(R1)** A project document contains no information about the user or the machine other than
    the locations of files referenced outside the project folder. With the default of copying on
-   import, or after "collect files into project", it contains none.
+   import, or after "collect files into project", it contains none. (It does name the version
+   of LINA that wrote it. The lock file that exists while a project is open names the machine;
+   it is not part of the saved project, doc 16.)
 
 ## Later
 
