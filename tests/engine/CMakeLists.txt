@@ -69,3 +69,7 @@ add_executable(lina_projection_bench projection_bench.cpp)
 lina_target_defaults(lina_projection_bench)
 target_link_libraries(lina_projection_bench PRIVATE
   Catch2::Catch2WithMain lina::engine_testing lina::model_test_support)
+
+# From a project file to sound: the one test that links the file format as well.
+lina_add_projection_test(lina_project_file_render_test project_file_render_test.cpp)
+target_link_libraries(lina_project_file_render_test PRIVATE lina::format)
