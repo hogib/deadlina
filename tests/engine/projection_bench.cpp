@@ -74,24 +74,12 @@ TEST_CASE("the cost of edits while a large project plays", "[bench]") {
   fixture.engine.openManualDevice({.sampleRate = 48'000.0, .blockSize = 512});
   fixture.engine.play();
   std::ignore = fixture.engine.process(4'096);
-  const auto &projection =
-      internal::TracktionAccess::projection(fixture.engine);
   const auto &edit = internal::TracktionAccess::edit(fixture.engine);
 
-  // The parts of one rebuild of the playback graph: the whole of it, and
-  // what the projection contributes, which is handing the engine every
-  // clip's events.
+  // One rebuild of the playback graph, which edits of notes, MIDI clips and
+  // the mixer no longer cause.
   const double rebuild = milliseconds([&] { fixture.engine.syncGraph(); });
-  const double handing = milliseconds([&] {
-    for (const auto &[id, entry] : projection.clips()) {
-      const auto &clip =
-          dynamic_cast<tracktion::MidiClip &>(*entry.parts.front());
-      std::ignore = projection.playbackSequence(clip);
-    }
-  });
-  std::println("one rebuild of the playback graph: {:.1f} ms, of which "
-               "handing over the events of {} clips: {:.1f} ms",
-               rebuild, projection.clips().size(), handing);
+  std::println("one rebuild of the playback graph: {:.1f} ms", rebuild);
 
   // An edit in its two parts: the command on the document, and the change
   // set through the engine, graph included.

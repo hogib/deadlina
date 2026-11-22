@@ -151,7 +151,8 @@ Built 2026-11-19, ahead of the projection.
    the target, checked, and renamed over it. A failure leaves an existing file untouched.
 4. **Changing the edit while playing.** After the edit is changed, one call rebuilds the
    playback graph at once and playback continues; sounding notes and plugin state carry across.
-   Tracktion's own route for this runs off a timer and is not used.
+   Tracktion's own route for this runs off a timer and is not used. Edits of MIDI notes and
+   clips and of the mixer rebuild nothing ("The projection as built", 1 and 3).
 5. **Errors.** Mistakes by the caller (wrong thread, no device, bad format or range) throw.
    Failures of the outside world (files) are returned as values.
 6. **Event loop.** The bridge registers JUCE's file descriptors with Qt's event loop, so one
@@ -168,30 +169,45 @@ Built 2026-11-19, ahead of the projection.
 
 ## The projection as built
 
-Built 2026-11-22. Scope so far: tempo and time signature, tracks, arrangement clips (MIDI and
-audio at file speed), volume, pan, mute, solo, sends and returns, and devices through a registry
-that plugin hosting will fill. Not projected yet: session slots and launching, automation,
+Built 2026-11-22. Scope so far: tempo, tracks, arrangement clips (MIDI clips played by LINA's
+own sequencer, audio clips at file speed), volume, pan, mute, solo, sends and returns, and
+devices through a registry that plugin hosting will fill. The time signature is not projected:
+nothing in the engine needs it, so Tracktion's stays at 4/4 and hosted plugins that read the
+host's bar position see 4/4. Not projected yet: session slots and launching, automation,
 controller data, the loop range and start marker, arm, monitoring and inputs, follow-tempo and
 transposition, edge fades and loop-join crossfades. Change sets that touch those are ignored
 safely.
 
 1. **One entry point.** The application hands the engine a whole project once, and after that
    each change set together with the document after the change. While a device is open the
-   engine rebuilds its playback graph itself, once per call; nothing is left for Tracktion's
-   timer.
+   engine rebuilds its playback graph itself, at most once per call, and only when the change
+   touches what Tracktion plays (audio clips, tracks, devices, sends, tempo); nothing is left
+   for Tracktion's timer, also after `play()`. Tracktion asks for one more rebuild whenever a
+   new graph registers its live-MIDI node on a track with no listeners; the projection keeps a
+   listener of its own that does nothing on every track, so that request never comes. This
+   relies on Tracktion's `AudioTrack::addListener` and must be rechecked on any upgrade.
 2. **Time.** Ticks become beats, seconds and frames in one place, with 128-bit integer
    arithmetic and rounding to the nearest frame. A beat is always a quarter note.
-3. **Notes are exact.** The engine's hook for playback sequences is given events generated
-   from the document's ticks, so projected notes start and end on the exact frame (settles the
-   earlier question about early note ends). A note-off is handed over 1/8 of a frame into its
-   frame and a note-on 3/8, so that where one clip ends and the next begins on the same pitch
-   the off always sorts before the on. Events are cached per clip.
-4. **Note guard.** A plugin of LINA's own sits first on every MIDI track and records the notes
-   that actually pass on the audio thread. After an edit while playing it is given the notes
-   the track now plays, and for a few blocks around the graph swap it ends any sounding note
-   that the new content does not end. It works from one pre-reserved buffer per edit and falls
-   back to "all notes off" for the track when that is not enough. It does not yet tell clip
-   notes from live notes (no live input exists before recording is built).
+3. **LINA plays MIDI clips itself.** MIDI clips do not become Tracktion clips. A sequencer
+   plugin of LINA's own sits first on every MIDI track. On the main thread each edit builds an
+   immutable sequence of the track's note events, computed from the document's ticks, and
+   publishes it through one atomic pointer; the audio thread picks it up at the start of its
+   next block and marks the one it uses, and the main thread frees every older sequence except
+   the marked one, so at most two are kept. Every buffer is owned on the main thread. The audio
+   thread does not allocate, lock or free. Notes start and end on the
+   exact frame. A note-off is handed over 1/8 of a frame into its frame and a note-on 3/8, so
+   that where one clip ends and the next begins on the same pitch the off always sorts before
+   the on.
+4. **What sounds across starts and edits.** The sequencer keeps its own record of the notes it
+   started. When playback starts inside a note, the note starts on the first frame played
+   (doc 08, rule 3). After an edit, a jump or a tempo change it ends the notes the new content
+   no longer holds under the playhead and starts none (doc 08, rule 9); held notes run on to
+   their new end. A block whose messages would not fit the room reserved for it is not sent:
+   the instrument gets "all notes off" instead and the block is counted; tests and benches
+   check that this never happens. Tracktion's MIDI arrays cannot be reserved in advance, so the
+   sequencer swaps buffers of its own, made on the main thread, into them. Memory: about 147 KB
+   per MIDI track while it is in a playback graph. It does not yet tell clip notes from live
+   notes (no live input exists before recording is built).
 5. **Mixer.** Gain is 10^(dB/20), exactly zero at silence. Pan is a constant-power balance with
    unity gain at centre (+3.01 dB hard to one side). Both are applied by a plugin of LINA's
    own with a 5 millisecond ramp counted in frames; Tracktion's volume and pan plugin is not
@@ -206,10 +222,15 @@ safely.
 8. **Limits of the engine.**
    - Tracktion's timeline ends at 48 hours. Clips that start at or behind 47.5 hours do not
      play. The document allows far more.
-   - Every edit that changes the graph makes Tracktion rebuild the whole graph. Measured in
-     an optimised build with 64 tracks, 2,560 clips and 163,840 notes: 32 to 44 ms for one
-     added note, 58 ms for a tempo change, 0.002 ms for a fader move. Doc 11's targets are
-     missed at the size of its large project.
+   - Every edit that changes Tracktion's graph makes it rebuild the whole graph. Measured in an
+     optimised build on doc 11's large project (256 tracks, about 519,000 notes), main thread,
+     medians: a note or MIDI clip edit 0.03 to 0.14 ms (worst 0.18 ms), a fader or mute
+     0.01 ms, the time signature nothing, all without a rebuild; an audio clip move 66 ms and
+     a tempo change 125 ms, each with one rebuild. Before LINA played MIDI itself, every note edit cost about
+     340 ms.
+   - With a real device, Tracktion can hand a rebuilt graph to the audio thread a block before
+     the new MIDI sequences are published. After a tempo change one block can then play new
+     audio against old MIDI; the sequencer reconciles on the next block and no note sticks.
    - A file at another sample rate than the device is converted at play time with the
      engine's best converter: residual about -146 dB, but the start is shifted by up to half
      a frame depending on block size.
@@ -246,11 +267,11 @@ safely.
 2. Editing while playing misses doc 11's response targets on a large project, because
    Tracktion rebuilds its whole graph per edit ("The projection as built", 8). Decided
    2026-11-22: LINA plays MIDI clips itself, through a sequencer of its own on every MIDI
-   track, and Tracktion keeps audio clips, the mixer and plugins. Measured on the large
-   project, a note or MIDI clip edit then costs well under a millisecond and rebuilds nothing,
-   against about 300 ms before. Audio clip edits (about 65 ms) and tempo changes (about 125 ms)
-   still rebuild Tracktion's graph at that size; LINA playing audio clips too is the way out if
-   that ever matters. Consequence: MIDI clips are launched by LINA's sequencer, not through
+   track, and Tracktion keeps audio clips, the mixer and plugins. Built the same day ("The
+   projection as built", 3, 4 and 8): a note or MIDI clip edit costs under 0.2 ms and rebuilds
+   nothing. Audio clip edits (about 66 ms) and tempo changes (about 125 ms) still rebuild
+   Tracktion's graph at that size; LINA playing audio clips too is the way out if that ever
+   matters. Consequence: MIDI clips are launched by LINA's sequencer, not through
    Tracktion's launch handles (item 5 of "The projection" holds for audio clips only).
 3. The model finds objects by scanning and has no index by identity. Its cost on the large
    project of doc 11 is unmeasured.

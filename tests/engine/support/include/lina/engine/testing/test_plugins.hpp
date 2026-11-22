@@ -127,6 +127,71 @@ private:
   std::atomic<float> gain_{1.0F};
 };
 
+/// Test plugin that writes down the note messages that pass through it, with
+/// the frame of the arrangement each one falls on, and changes nothing: audio
+/// and MIDI go on as they came. Placed behind the test instrument, which
+/// hands on the MIDI it is given, it tells what the instrument was asked to
+/// play.
+///
+/// It keeps up to `capacity` messages; take() hands them over and starts
+/// afresh. Recording runs on the audio thread and take() on the message
+/// thread, between blocks; the engine of a test runs its blocks on the
+/// message thread, so the two never overlap.
+class MidiProbe final : public tracktion::Plugin {
+public:
+  static constexpr const char *xmlTypeName = "linaTestMidiProbe";
+  static constexpr std::size_t capacity = 262'144;
+
+  /// One message: a note-on (velocity 1 to 127), a note-off (velocity 0), or
+  /// a block that told the instrument to end every note.
+  struct Note {
+    std::int64_t frame = 0;
+    int pitch = 0;
+    int velocity = 0;
+    bool allNotesOff = false;
+    bool playing = false;
+  };
+
+  explicit MidiProbe(const tracktion::PluginCreationInfo &info);
+  ~MidiProbe() override;
+
+  MidiProbe(const MidiProbe &) = delete;
+  MidiProbe &operator=(const MidiProbe &) = delete;
+  MidiProbe(MidiProbe &&) = delete;
+  MidiProbe &operator=(MidiProbe &&) = delete;
+
+  static const char *getPluginName() { return "LINA test MIDI probe"; }
+  static juce::ValueTree create();
+
+  /// What passed since the last call, in order. Message thread.
+  std::vector<Note> take();
+  /// True when more passed than the probe keeps.
+  [[nodiscard]] bool overflowed() const { return overflowed_.load(); }
+  /// The frame the last block began on.
+  [[nodiscard]] std::int64_t lastBlockStart() const {
+    return lastBlockStart_.load();
+  }
+
+  juce::String getName() const override { return getPluginName(); }
+  juce::String getPluginType() override { return xmlTypeName; }
+  juce::String getSelectableDescription() override { return getName(); }
+  bool takesMidiInput() override { return true; }
+
+  void initialise(const tracktion::PluginInitialisationInfo &info) override;
+  void deinitialise() override;
+  void applyToBuffer(const tracktion::PluginRenderContext &context)
+      [[clang::nonblocking]] override;
+
+private:
+  void record(const Note &note) [[clang::nonblocking]];
+
+  std::vector<Note> notes_;
+  std::atomic<std::size_t> count_{0};
+  std::atomic<bool> overflowed_{false};
+  std::atomic<std::int64_t> lastBlockStart_{0};
+  std::atomic<double> sampleRate_{0.0};
+};
+
 /// The format under which the test plugins are known to devices of a
 /// document, with the instrument's and the effect's type names as
 /// identifiers.
@@ -143,6 +208,7 @@ inline constexpr int maxDeviceDelayFrames = 65'536;
 /// unity gain.
 model::Device toneDevice();
 model::Device delayGainDevice(int delayFrames, float gain);
+model::Device midiProbeDevice();
 
 /// Makes the test plugins available to devices of a document.
 void registerTestDeviceBindings(internal::DeviceRegistry &registry);

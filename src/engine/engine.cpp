@@ -44,10 +44,7 @@ private:
 /// Where LINA decides instead of the engine.
 class Behaviour final : public te::EngineBehaviour {
 public:
-  /// `projection` is the one whose MIDI clips play what it says. It has to
-  /// outlive the engine that owns this object.
-  Behaviour(int audioThreads, const internal::Projection &projection)
-      : audioThreads_(audioThreads), projection_(&projection) {}
+  explicit Behaviour(int audioThreads) : audioThreads_(audioThreads) {}
 
   // The engine never looks at the machine's audio devices on its own.
   bool autoInitialiseDeviceManager() override { return false; }
@@ -88,25 +85,8 @@ public:
     };
   }
 
-  // A MIDI clip of the projection plays the note events the projection
-  // worked out from the document; any other clip plays what the engine
-  // reads from it.
-  juce::MidiMessageSequence
-  createPlaybackMidiSequence(const te::MidiList &list, te::MidiClip &clip,
-                             te::MidiList::TimeBase timeBase,
-                             bool generateMpe) override {
-    if (timeBase == te::MidiList::TimeBase::seconds) {
-      if (auto sequence = projection_->playbackSequence(clip)) {
-        return std::move(*sequence);
-      }
-    }
-    return te::MidiList::createDefaultPlaybackMidiSequence(list, clip, timeBase,
-                                                           generateMpe);
-  }
-
 private:
   int audioThreads_;
-  const internal::Projection *projection_;
 };
 
 juce::File toJuceFile(const std::filesystem::path &path) {
@@ -223,17 +203,21 @@ void stopAndReleaseGraph(const te::Edit &edit) {
 }
 
 /// Starts the edit on the open manual device, whose format is `format`.
+/// Builds the playback graph once and leaves nothing for the engine's timer.
 void startPlayback(te::Edit &edit, internal::Projection &projection,
                    const StreamFormat &format, std::int64_t startFrame) {
   stopAndReleaseGraph(edit);
-  projection.playbackRestarted();
+  projection.playbackStarting();
   auto &transport = edit.getTransport();
-  edit.dispatchPendingUpdatesSynchronously();
   transport.setPosition(toTime(startFrame, format.sampleRate));
-  // Makes the playback context if this is the first run, which must not
-  // happen before a device is open: a context made without one computes its
-  // stream times from a sample rate of zero. Then builds the graph.
-  transport.ensureContextAllocated(true);
+  // A rebuild the edit still asks for (after edits made without a device)
+  // builds the graph here, at the start frame.
+  edit.dispatchPendingUpdatesSynchronously();
+  // Otherwise the graph is built now. This makes the playback context if
+  // this is the first run, which must not happen before a device is open: a
+  // context made without one computes its stream times from a sample rate
+  // of zero.
+  transport.ensureContextAllocated(false);
   transport.play(false);
 }
 
@@ -275,28 +259,27 @@ struct Engine::Impl {
       : storage(prepareStorageFolder(config.storageFolder)),
         projection(devices),
         engine(std::make_unique<FolderPropertyStorage>(storage), nullptr,
-               std::make_unique<Behaviour>(std::max(1, config.audioThreads),
-                                           projection)),
+               std::make_unique<Behaviour>(std::max(1, config.audioThreads))),
         edit(createEdit(engine, storage)) {
     auto &plugins = engine.getPluginManager();
     plugins.createBuiltInType<internal::StripGainPlugin>();
     plugins.createBuiltInType<internal::PlaceholderPlugin>();
-    plugins.createBuiltInType<internal::NoteGuardPlugin>();
+    plugins.createBuiltInType<internal::SequencerPlugin>();
     projection.attach(*edit);
   }
 
-  /// Makes the playback graph match the edit now, if the engine or the
-  /// projection says it is out of date, and leaves nothing for the engine's
-  /// own timer to do.
+  /// Makes the playback graph match the edit now, if the engine says it is
+  /// out of date, and leaves nothing for the engine's own timer to do. Then
+  /// hands the sequencers what their tracks play now. With the manual device
+  /// the new graph and the new sequences are taken up by the same block;
+  /// with a real device the graph can reach the audio thread a block before
+  /// the sequences, and the sequencers reconcile at the next block
+  /// (Projection::publish()).
   void syncAfterEdit() {
-    if (!device) {
-      return;
+    if (device) {
+      edit->dispatchPendingUpdatesSynchronously();
     }
-    if (projection.takeGraphStale()) {
-      edit->restartPlayback();
-    }
-    edit->dispatchPendingUpdatesSynchronously();
-    projection.graphHandedOver();
+    projection.publish();
   }
 
   void openDevice(const StreamFormat &format);
@@ -309,9 +292,8 @@ struct Engine::Impl {
 
   juce::File storage;
   internal::DeviceRegistry devices;
-  /// Declared before the engine, which asks it for the events of MIDI
-  /// clips: it is there for as long as the engine is. The engine objects it
-  /// holds are let go before the edit is destroyed (~Engine).
+  /// The engine objects it holds are let go before the edit is destroyed
+  /// (~Engine).
   internal::Projection projection;
   te::Engine engine;
   std::unique_ptr<te::Edit> edit;
@@ -366,6 +348,7 @@ void Engine::Impl::openDevice(const StreamFormat &format) {
   device = format;
   // Clips sit on the sample grid of the device that plays them.
   projection.setSampleRate(format.sampleRate);
+  projection.publish();
 }
 
 void Engine::Impl::closeDevice() {
@@ -469,8 +452,7 @@ void Engine::syncGraph() {
   // second does the timer's work and stops it.
   impl_->edit->restartPlayback();
   impl_->edit->dispatchPendingUpdatesSynchronously();
-  std::ignore = impl_->projection.takeGraphStale();
-  impl_->projection.graphHandedOver();
+  impl_->projection.publish();
 }
 
 AudioBuffer Engine::process(std::int64_t frameCount) {

@@ -32,8 +32,10 @@ lina_add_catch_test(lina_engine_unit_tests
   SOURCES
     audio_parts_test.cpp
     midi_events_test.cpp
+    midi_outlet_test.cpp
     mixing_test.cpp
-    note_guard_test.cpp
+    note_player_test.cpp
+    sequence_test.cpp
     time_map_test.cpp
   LIBRARIES lina::engine_internals lina::model_test_support)
 
@@ -49,6 +51,7 @@ lina_add_projection_test(lina_projection_midi_test projection_midi_test.cpp)
 lina_add_projection_test(lina_projection_audio_test projection_audio_test.cpp)
 lina_add_projection_test(lina_projection_mixer_test projection_mixer_test.cpp)
 lina_add_projection_test(lina_projection_live_test projection_live_test.cpp)
+lina_add_projection_test(lina_projection_sequencer_test projection_sequencer_test.cpp)
 
 # The oracle: an edit kept in step with generated commands against one built from scratch.
 # LINA_PROJECTION_SOAK=<n> in the environment runs n times as many sequences.
@@ -73,3 +76,10 @@ target_link_libraries(lina_projection_bench PRIVATE
 # From a project file to sound: the one test that links the file format as well.
 lina_add_projection_test(lina_project_file_render_test project_file_render_test.cpp)
 target_link_libraries(lina_project_file_render_test PRIVATE lina::format)
+
+# Doc 11's large project: what edits cost while it plays, and how many playback graphs they
+# build. A bench like the one above; its header says how to run it.
+add_executable(lina_projection_large_bench projection_large_bench.cpp)
+lina_target_defaults(lina_projection_large_bench)
+target_link_libraries(lina_projection_large_bench PRIVATE
+  Catch2::Catch2WithMain lina::engine_testing lina::model_test_support)

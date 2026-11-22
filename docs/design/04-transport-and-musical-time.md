@@ -96,7 +96,9 @@ Two different things are called quantisation. This doc names them apart.
 ## Tempo changes while playing
 
 1. **(R1)** Changing the tempo while playing takes effect immediately and without a gap. MIDI
-   clips follow because their content is in musical time. `[own design]`
+   clips follow because their content is in musical time. The playhead keeps its musical
+   position; a note sounding at the change runs on to its end at the new tempo, and no note
+   restarts (doc 08, rule 9). `[own design]`
 2. **(R1)** Audio clips set to follow the tempo are time-stretched to stay in musical time; audio
    clips not set to follow it keep their original speed and drift against the grid (doc 07).
    `[own design]`

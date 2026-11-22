@@ -346,27 +346,93 @@ TEST_CASE("a looped MIDI clip repeats its loop from its content start",
   CHECK(fixture.assertions.count() == 0);
 }
 
-TEST_CASE("playback that starts inside a note plays the rest of it",
+TEST_CASE("playback that starts inside a note plays the rest of it from the "
+          "first frame",
           "[projection][midi]") {
+  // Docs/design/08-midi-clips-and-note-editing.md, "Playback", rule 3.
   ProjectionFixture fixture("projection-midi-chase");
   const TrackId track = fixture.addToneTrack();
   fixture.addClip(track, makeMidiClip(beat(0), beats(4),
                                       {
                                           makeNote(60, beat(0), beats(2), 127),
-                                          makeNote(64, beat(3), beats(1), 127),
+                                          makeNote(64, beat(3), beats(1), 100),
                                       }));
+  for (const int blockSize : {512, 441, 64, 7}) {
+    CAPTURE(blockSize);
+    fixture.engine.openManualDevice(
+        {.sampleRate = 48'000.0, .blockSize = blockSize});
+    fixture.engine.play(30'000);
+    const auto audio = fixture.engine.process(72'000);
+    const auto &left = audio.channels.at(0);
+    // The held note starts on the first frame played, at full level, and
+    // runs to its end on beat 2, frame 48000 of the arrangement; the next
+    // note starts on beat 3.
+    const std::array notes{
+        SoundingNote{
+            .pitch = 60,
+            .velocity = 127,
+            .onFrame = 0,
+            .offFrame = 48'000 - 30'000,
+        },
+        SoundingNote{
+            .pitch = 64,
+            .velocity = 100,
+            .onFrame = 72'000 - 30'000,
+            .offFrame = 96'000 - 30'000,
+        },
+    };
+    // Tolerance: formulaTolerance, 1e-6 of full scale.
+    CHECK(maxDifference(left, referenceSignal(72'000, 48'000.0, notes)) <=
+          formulaTolerance);
+    CHECK(firstSoundingFrame(left) == 0);
+    CHECK(left.at(0) == 1.0F);
+    CHECK(silent(left, 48'000 - 30'000, 72'000 - 30'000));
+  }
+  CHECK(fixture.assertions.count() == 0);
+}
+
+TEST_CASE("playback that starts inside a note of a looped clip chases the "
+          "pass it is in, and not a note from before the content start",
+          "[projection][midi]") {
+  // Rules 3 and 6: a note that begins before the clip's content start, or
+  // before the loop start once the loop has wrapped, does not sound.
+  ProjectionFixture fixture("projection-midi-chase-loop");
+  const TrackId track = fixture.addToneTrack();
+  Clip clip = makeMidiClip(beat(0), beats(8),
+                           {
+                               makeNote(60, beat(0), beats(3), 110),
+                               makeNote(64, beat(2), beats(2), 90),
+                           });
+  // Content from beat 1, looping beats 1 to 3: pitch 60 starts before both
+  // and never sounds; pitch 64 sounds from beat 2 to the loop end on each
+  // pass, at clip beats 1, 3, 5 and 7.
+  clip.extent.contentStart = beat(1);
+  clip.loop = {.enabled = true, .start = beat(1), .length = beats(2)};
+  fixture.addClip(track, clip);
+  constexpr std::int64_t quarter = 24'000;
   fixture.engine.openManualDevice({.sampleRate = 48'000.0, .blockSize = 512});
-  fixture.engine.play(30'000);
-  const auto audio = fixture.engine.process(72'000);
-  const auto &left = audio.channels.at(0);
-  // The engine starts a note that is already sounding 0.0001 s into the
-  // first block, which is frame 5 at 48 kHz; from there it runs to its end
-  // on beat 2, frame 48000 of the arrangement.
-  CHECK(firstSoundingFrame(left) == 5);
-  CHECK(left.at(5) == 1.0F);
-  CHECK(left.at(48'000 - 30'000 - 1) != 0.0F);
-  CHECK(silent(left, 48'000 - 30'000, 72'000 - 30'000));
-  CHECK(left.at(72'000 - 30'000) == 1.0F);
+  const std::int64_t start = (3 * quarter) + 5'000;
+  fixture.engine.play(start);
+  const auto audio = fixture.engine.process(3 * quarter);
+  const std::array notes{
+      SoundingNote{
+          .pitch = 64,
+          .velocity = 90,
+          .onFrame = 0,
+          .offFrame = (4 * quarter) - start,
+      },
+      SoundingNote{
+          .pitch = 64,
+          .velocity = 90,
+          .onFrame = (5 * quarter) - start,
+          .offFrame = (6 * quarter) - start,
+      },
+  };
+  // Tolerance: formulaTolerance, 1e-6 of full scale.
+  CHECK(maxDifference(audio.channels.at(0),
+                      referenceSignal(3 * quarter, 48'000.0, notes)) <=
+        formulaTolerance);
+  CHECK(audio.channels.at(0).at(0) == 90.0F / 127.0F);
   CHECK(fixture.assertions.count() == 0);
 }
 
@@ -414,29 +480,35 @@ TEST_CASE("a MIDI clip behind the engine's horizon is not played, and comes "
   const ClipId clip =
       fixture.addClip(track, makeMidiClip(beat(400'000), beats(4),
                                           {makeNote(60, beat(0), beats(1))}));
-  const auto &entry =
-      internal::TracktionAccess::projection(fixture.engine).clips().at(clip);
-  CHECK(entry.parts.empty());
+  const auto &projection =
+      internal::TracktionAccess::projection(fixture.engine);
+  const auto plays = [&] {
+    return !projection.clips().at(clip).playback->events().events.empty();
+  };
+  const auto &sequencer = *projection.tracks().at(track).sequencer;
+  CHECK(!plays());
+  CHECK(sequencer.published()->clips().empty());
   const auto audio = fixture.playFromStart(48'000.0, 4'800);
   CHECK(firstSoundingFrame(audio.channels.at(0)) == -1);
 
   fixture.setTempo(30'000);
-  REQUIRE(entry.parts.size() == 1);
+  REQUIRE(plays());
+  CHECK(sequencer.published()->clips().size() == 1);
   const std::int64_t start = nearestFrame(beat(400'000).ticks, 30'000, 48'000);
   fixture.engine.play(start - 100);
   const auto late = fixture.engine.process(4'800);
   CHECK(firstSoundingFrame(late.channels.at(0)) == 100);
 
   fixture.setTempo(12'000);
-  CHECK(entry.parts.empty());
+  CHECK(!plays());
   CHECK(fixture.assertions.count() == 0);
 }
 
 TEST_CASE("a MIDI clip that the projection did not make is played the "
           "engine's own way",
           "[projection][midi]") {
-  // The projection answers only for its own clips; an edit built by hand
-  // keeps the engine's early note-off (reference_signal.hpp).
+  // The projection makes no engine clips for MIDI; one built by hand plays
+  // as the engine plays it, with its early note-off (reference_signal.hpp).
   ProjectionFixture fixture("projection-midi-foreign");
   auto &track = addTrack(fixture.engine);
   addToneInstrument(track);
@@ -448,18 +520,12 @@ TEST_CASE("a MIDI clip that the projection did not make is played the "
           .velocity = 127,
       },
   };
-  auto &clip = addMidiClip(track, 0.0, 4.0, notes);
+  addMidiClip(track, 0.0, 4.0, notes);
   const auto audio = fixture.playFromStart(48'000.0, 24'000);
   const std::int64_t off = releaseFrame(12'000, 48'000.0);
   CHECK(off == 11'995);
   CHECK(audio.channels.at(0).at(static_cast<std::size_t>(off) - 1) != 0.0F);
   CHECK(silent(audio.channels.at(0), off, 24'000));
-  // Asked for beats, the projection's clips are the engine's business too:
-  // the projection keeps no notes in the engine's own note list.
-  CHECK(clip.getSequence()
-            .exportToPlaybackMidiSequence(
-                clip, tracktion::MidiList::TimeBase::beats, false)
-            .getNumEvents() == 2);
   CHECK(fixture.assertions.count() == 0);
 }
 

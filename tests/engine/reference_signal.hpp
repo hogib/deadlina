@@ -40,8 +40,8 @@ struct SoundingNote {
 /// Tracktion Engine v3.2.0 sends every such note-off 0.0001 s early
 /// (MidiNote::getPlaybackTime, "nudge the note-up backwards"), which is 4.8
 /// frames at 48 kHz; the instrument rounds event times to the nearest frame.
-/// A clip of a document does not go this way: the projection hands the
-/// engine its notes itself, and they end on their exact frame.
+/// A clip of a document does not go this way: LINA's own sequencer plays
+/// its notes, and they end on their exact frame.
 inline std::int64_t releaseFrame(std::int64_t nominalEndFrame,
                                  double sampleRate) {
   return std::lround(static_cast<double>(nominalEndFrame) -

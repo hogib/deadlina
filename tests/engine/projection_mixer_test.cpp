@@ -428,10 +428,11 @@ TEST_CASE("devices of a track process its signal in chain order",
     };
     auto *delayPlugin = projection.devices().at(delay).plugin.get();
     auto *secondPlugin = projection.devices().at(second).plugin.get();
-    // The note guard, the instrument, the two effects, the strip, the send
+    // The sequencer, the instrument, the two effects, the strip, the send
     // and the output.
     REQUIRE(chain().size() == 7);
-    CHECK(chain().at(0) == projection.tracks().at(fixture.track).guard.get());
+    CHECK(chain().at(0) ==
+          projection.tracks().at(fixture.track).sequencer.get());
     CHECK(chain().at(2) == delayPlugin);
     CHECK(chain().at(3) == secondPlugin);
 

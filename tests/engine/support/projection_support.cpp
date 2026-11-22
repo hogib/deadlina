@@ -132,6 +132,9 @@ private:
     for (auto *clip : clips) {
       this->clip(*clip, known->first);
     }
+    if (entry.sequencer != nullptr) {
+      sequence(*entry.sequencer);
+    }
   }
 
   void plugin(te::Plugin &plugin, const Projection::TrackEntry *entry) {
@@ -139,8 +142,8 @@ private:
       line("  strip {}", gains(*entry->strip));
       return;
     }
-    if (entry != nullptr && &plugin == entry->guard.get()) {
-      line("  note guard");
+    if (entry != nullptr && &plugin == entry->sequencer.get()) {
+      line("  sequencer");
       return;
     }
     if (entry != nullptr && &plugin == entry->output.get()) {
@@ -229,15 +232,6 @@ private:
                     position.getStart().inSeconds() * time.sampleRate(),
                     position.getEnd().inSeconds() * time.sampleRate(),
                     position.getOffset().inSeconds());
-    if (const auto *midi = dynamic_cast<te::MidiClip *>(&clip)) {
-      line("  clip {} midi {} origin {} seconds {} channel {} looping {} mute "
-           "{} volume {}",
-           id.value, where, known->second.originFrame, midi->canUseProxy(),
-           midi->getMidiChannel().getChannelNumber(), midi->isLooping(),
-           midi->isMuted(), midi->getVolumeDb());
-      events(known->second);
-      return;
-    }
     const auto &audio = dynamic_cast<te::WaveAudioClip &>(clip);
     line("  clip {} audio {} file {} converter {} gain {} loop {:.9f}+{:.9f} "
          "looping {} proxy {} tempo {} pitch {} stretch {} speed {} reversed "
@@ -253,17 +247,33 @@ private:
          audio.getAutoCrossfade(), audio.getPan(), audio.isMuted());
   }
 
-  /// The events the projection hands the engine for a MIDI clip. Asking
-  /// for them changes nothing.
-  void events(const Projection::ClipEntry &entry) {
-    const auto events = projection_->eventsOf(entry);
+  /// What a MIDI track's sequencer was given last: the clips it plays, in
+  /// order, and their events. Asking for them changes nothing.
+  void sequence(const internal::SequencerPlugin &sequencer) {
+    const auto published = sequencer.published();
+    if (published == nullptr) {
+      line("  sequence: none");
+      return;
+    }
+    line("  sequence at {} Hz, {} clips", published->sampleRate(),
+         published->clips().size());
+    for (const internal::SequencedClip &clip : published->clips()) {
+      sequenced_.insert(clip.clip);
+      const internal::ClipEvents &events = clip.playback->events();
+      line("  clip {} midi frames {} to {}", clip.clip.value, events.startFrame,
+           events.endFrame);
+      this->events(events);
+    }
+  }
+
+  void events(const internal::ClipEvents &events) {
     std::uint64_t checksum = 14'695'981'039'346'656'037ULL;
     const auto mix = [&](std::uint64_t value) {
       constexpr std::uint64_t prime = 1'099'511'628'211ULL;
       checksum = (checksum ^ value) * prime;
     };
     int index = 0;
-    for (const internal::NoteEvent &event : events->events) {
+    for (const internal::NoteEvent &event : events.events) {
       mix(static_cast<std::uint64_t>(event.frame));
       mix(event.pitch);
       mix(event.velocity);
@@ -272,9 +282,9 @@ private:
              event.pitch, event.velocity);
       }
     }
-    line("    {} events from {} to {}, checksum {}{}", events->events.size(),
-         events->startFrame, events->endFrame, checksum,
-         events->truncated ? ", cut short" : "");
+    line("    {} events from {} to {}, checksum {}{}", events.events.size(),
+         events.startFrame, events.endFrame, checksum,
+         events.truncated ? ", cut short" : "");
   }
 
   /// Entries of the projection whose engine objects the walk did not meet.
@@ -290,6 +300,10 @@ private:
       }
     }
     for (const auto &[id, entry] : projection_->clips()) {
+      if (entry.playback != nullptr) {
+        midiLeftover(id, entry);
+        continue;
+      }
       const auto seen = seenParts_.find(id);
       const std::size_t count = seen == seenParts_.end() ? 0 : seen->second;
       if (count != entry.parts.size()) {
@@ -301,12 +315,25 @@ private:
     }
   }
 
+  /// A MIDI clip of the projection that its track's sequencer does not
+  /// play, or plays although it has nothing to play.
+  void midiLeftover(model::ClipId id, const Projection::ClipEntry &entry) {
+    const bool plays = !entry.playback->events().events.empty();
+    if (plays != sequenced_.contains(id)) {
+      line("clip {} of the projection is {} its track's sequence", id.value,
+           plays ? "missing from" : "in");
+    } else if (!plays) {
+      line("clip {} lies behind the horizon or plays nothing", id.value);
+    }
+  }
+
   te::Edit *edit_;
   const Projection *projection_;
   std::string text_;
   std::set<model::TrackId> seenTracks_;
   std::set<model::DeviceId> seenDevices_;
   std::map<model::ClipId, std::size_t> seenParts_;
+  std::set<model::ClipId> sequenced_;
 };
 
 } // namespace

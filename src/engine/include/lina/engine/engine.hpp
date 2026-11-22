@@ -156,7 +156,9 @@ public:
   /// playback so that the first frame of the next process() call is
   /// `startFrame`, counted at the manual device's sample rate. Every device in
   /// the edit starts from its initial state: nothing of an earlier run is
-  /// heard. Needs a manual device.
+  /// heard. A note of a MIDI clip that is sounding at `startFrame` starts on
+  /// that frame (docs/design/08-midi-clips-and-note-editing.md, "Playback",
+  /// rule 3). Needs a manual device.
   ///
   /// The first play() or render of an Engine blocks for about 0.2 s of real
   /// time: the engine underneath waits that long for a device that is not

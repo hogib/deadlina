@@ -153,7 +153,7 @@ TEST_CASE("a clip moved ahead of the playhead plays at its new place",
     CHECK(identical(live, fromStart));
     CHECK(!identical(live, unedited));
   }
-  SECTION("to another track, where its sounding note starts again") {
+  SECTION("to another track, where its sounding note does not start") {
     const auto live = fixture.playAcross(editFrame, totalFrames, [&] {
       fixture.edit(MoveClip{
           .clip = fixture.clip,
@@ -162,24 +162,14 @@ TEST_CASE("a clip moved ahead of the playhead plays at its new place",
       });
     });
     // The held note ends on the track it left, whose delay plays out what
-    // it holds for 12000 frames more. On the track it came to, the engine
-    // starts it 0.0001 s into the next block, frame 5 at 48 kHz, and it
-    // runs to its end on beat 6.
-    const std::array notes{
-        SoundingNote{
-            .pitch = 48,
-            .velocity = 80,
-            .onFrame = editFrame + 5,
-            .offFrame = 6 * quarter,
-        },
-    };
-    const auto expected = referenceSignal(totalFrames, sampleRate, notes);
-    const auto from = static_cast<std::size_t>(editFrame + 12'000);
-    // Tolerance: formulaTolerance, 1e-6 of full scale.
-    CHECK(maxDifference(std::span(live.channels.at(0)).subspan(from),
-                        std::span(expected).subspan(from)) <= formulaTolerance);
-    // Until then the delay's tail and the restarted note sound together.
-    CHECK(live.channels.at(0).at(from - 1) != expected.at(from - 1));
+    // it holds for 12000 frames more. On the track it came to it covers the
+    // playhead and is not started (docs/design/08-midi-clips-and-note-
+    // editing.md, "Playback", rule 9); the clip has no later note.
+    const auto edit = static_cast<std::size_t>(editFrame);
+    CHECK(std::ranges::equal(std::span(live.channels.at(0)).first(edit),
+                             std::span(unedited.channels.at(0)).first(edit)));
+    CHECK(live.channels.at(0).at(edit + 11'999) != 0.0F);
+    CHECK(lastSoundingFrame(live.channels.at(0)) == editFrame + 12'000 - 1);
   }
   CHECK(fixture.assertions.count() == 0);
 }
@@ -577,78 +567,170 @@ TEST_CASE("describing the edit between an edit and the next block changes "
           "nothing",
           "[projection][live]") {
   StaleFixture fixture("projection-live-describe");
-  const auto &projection =
-      internal::TracktionAccess::projection(fixture.engine);
+  const auto &sequencer = *internal::TracktionAccess::projection(fixture.engine)
+                               .tracks()
+                               .at(fixture.track)
+                               .sequencer;
   fixture.engine.openManualDevice({.sampleRate = sampleRate, .blockSize = 512});
   fixture.engine.play();
   AudioBuffer audio = fixture.engine.process(48'000);
-  const std::uint64_t requests = projection.sequenceRequests();
+  const std::uint64_t graphs = sequencer.graphsPrepared();
+  const auto published = sequencer.published();
   const std::string before = describeEdit(fixture.engine);
   CHECK(describeEdit(fixture.engine) == before);
-  CHECK(projection.sequenceRequests() == requests);
+  CHECK(sequencer.graphsPrepared() == graphs);
+  CHECK(sequencer.published() == published);
   fixture.edit(RemoveNotes{.clip = fixture.clip, .notes = {fixture.late()}});
+  const auto edited = sequencer.published();
+  CHECK(edited != published);
   std::ignore = describeEdit(fixture.engine);
   std::ignore = fixture.engine.truncatedClips();
+  CHECK(sequencer.published() == edited);
   append(audio, fixture.engine.process(12'000));
   CHECK(maxDifference(audio.channels.at(0),
                       StaleFixture::expected(60'000, 48'000)) <=
         formulaTolerance);
+  CHECK(sequencer.graphsPrepared() == graphs);
   CHECK(fixture.assertions.count() == 0);
 }
 
-TEST_CASE("applying a change set while playing leaves nothing for later",
+TEST_CASE("edits of notes, MIDI clips, the mixer and the time signature "
+          "build no playback graph, and nothing is left for later",
           "[projection][live]") {
   StaleFixture fixture("projection-live-complete");
-  const auto &projection =
-      internal::TracktionAccess::projection(fixture.engine);
   auto &edit = internal::TracktionAccess::edit(fixture.engine);
   const TrackId other = fixture.addToneTrack();
-  fixture.addClip(other, makeMidiClip(beat(0), beats(4),
-                                      {makeNote(52, beat(0), beats(1), 30)}));
+  const ClipId otherClip = fixture.addClip(
+      other,
+      makeMidiClip(beat(0), beats(4), {makeNote(52, beat(0), beats(1), 30)}));
+  const TrackId returns = fixture.addTrack(TrackKind::Return);
+  const auto &projection =
+      internal::TracktionAccess::projection(fixture.engine);
+  // Every graph the engine builds holds every track's plugins: a track's
+  // sequencer counts them all.
+  const auto graphs = [&] {
+    return projection.tracks().at(fixture.track).sequencer->graphsPrepared();
+  };
+  // What the engine's own timer would run: nothing must be left for it.
+  const auto timer = [&] {
+    const std::uint64_t before = graphs();
+    edit.dispatchPendingUpdatesSynchronously();
+    return graphs() - before;
+  };
   fixture.engine.openManualDevice({.sampleRate = sampleRate, .blockSize = 512});
+  CHECK(timer() == 0);
+
+  // Playing builds one graph and leaves nothing pending, though the graph
+  // is built from nothing.
+  std::uint64_t before = graphs();
   fixture.engine.play();
+  CHECK(graphs() == before + 1);
+  CHECK(timer() == 0);
   std::ignore = fixture.engine.process(4'096);
+  CHECK(timer() == 0);
 
-  // An edit of the notes: the graph is rebuilt once, which asks for each of
-  // the two MIDI clips once, and the engine's own timer has nothing left to
-  // do: running what it would run rebuilds nothing.
-  std::uint64_t requests = projection.sequenceRequests();
-  fixture.edit(AddNotes{
-      .clip = fixture.clip,
-      .notes = {makeNote(76, beat(8), beats(1), 90)},
-  });
-  CHECK(projection.sequenceRequests() == requests + 2);
-  edit.dispatchPendingUpdatesSynchronously();
-  CHECK(projection.sequenceRequests() == requests + 2);
-  const auto &guard = *projection.tracks().at(fixture.track).guard;
-  CHECK(guard.isWatching());
-  std::ignore = fixture.engine.process(std::int64_t{512} *
-                                       internal::NoteGuardPlugin::settleBlocks);
-  CHECK(!guard.isWatching());
-
-  // A structural edit, which the engine notices by itself: once as well.
-  requests = projection.sequenceRequests();
-  fixture.addDevice(other, delayGainDevice(3, 1.0F));
-  CHECK(projection.sequenceRequests() == requests + 2);
-  edit.dispatchPendingUpdatesSynchronously();
-  CHECK(projection.sequenceRequests() == requests + 2);
-
-  // A fader needs no new graph at all.
-  requests = projection.sequenceRequests();
-  fixture.set(other, VolumeValue{-3.0});
-  fixture.set(other, NameValue{"renamed"});
-  edit.dispatchPendingUpdatesSynchronously();
-  CHECK(projection.sequenceRequests() == requests);
-
-  // Neither does a change of the time signature alone.
+  // None of these builds a graph.
+  const auto noGraph = [&](const char *what, const Command &command) {
+    INFO(what);
+    const std::uint64_t at = graphs();
+    fixture.edit(command);
+    CHECK(graphs() == at);
+    CHECK(timer() == 0);
+    std::ignore = fixture.engine.process(512);
+  };
+  noGraph("note added", AddNotes{
+                            .clip = fixture.clip,
+                            .notes = {makeNote(76, beat(8), beats(1), 90)},
+                        });
+  noGraph("note changed",
+          SetNotes{
+              .clip = fixture.clip,
+              .notes =
+                  {
+                      {
+                          .id = fixture.late(),
+                          .pitch = 70,
+                          .start = TickPosition{StaleFixture::noteOnTick},
+                          .length = beats(3),
+                          .velocity = 100,
+                      },
+                  },
+          });
+  noGraph("note removed",
+          RemoveNotes{.clip = fixture.clip, .notes = {fixture.late()}});
+  noGraph("clip moved",
+          MoveClip{.clip = otherClip, .container = other, .position = beat(9)});
+  noGraph("clip moved to another track", MoveClip{
+                                             .clip = otherClip,
+                                             .container = fixture.track,
+                                             .position = beat(20),
+                                         });
+  const LoopSettings loop{
+      .enabled = true,
+      .start = beat(0),
+      .length = beats(1),
+  };
+  noGraph("clip looped",
+          SetClipProperty{.clip = otherClip, .property = LoopValue{loop}});
+  noGraph("clip added", AddClip{
+                            .container = other,
+                            .clip = makeMidiClip(beat(30), beats(2), {}),
+                        });
+  noGraph("clip removed", RemoveClip{otherClip});
+  noGraph("volume",
+          SetTrackProperty{.track = other, .property = VolumeValue{-3.0}});
+  noGraph("pan", SetTrackProperty{.track = other, .property = PanValue{0.5}});
+  noGraph("mute",
+          SetTrackProperty{.track = other, .property = MuteValue{true}});
+  noGraph("solo",
+          SetTrackProperty{.track = other, .property = SoloValue{true}});
+  noGraph("send",
+          SetTrackProperty{
+              .track = other,
+              .property = SendValue{{.target = returns, .levelDb = -6.0}},
+          });
+  noGraph("name",
+          SetTrackProperty{.track = other, .property = NameValue{"renamed"}});
   const auto sevenEight = TimeSignature::make(7, 8);
   REQUIRE(sevenEight.has_value());
-  const auto *engineClip =
-      projection.clips().at(fixture.clip).parts.front().get();
-  fixture.edit(SetProjectProperty{
-      TimeSignatureValue{sevenEight.value_or(TimeSignature{})},
-  });
-  CHECK(projection.clips().at(fixture.clip).parts.front().get() == engineClip);
+  noGraph("time signature",
+          SetProjectProperty{
+              TimeSignatureValue{sevenEight.value_or(TimeSignature{})},
+          });
+
+  // A structural edit builds one graph, and leaves nothing for later.
+  before = graphs();
+  fixture.addDevice(other, delayGainDevice(3, 1.0F));
+  CHECK(graphs() == before + 1);
+  CHECK(timer() == 0);
+  // So does a change of tempo, and a graph rebuilt by hand.
+  before = graphs();
+  fixture.setTempo(13'000);
+  CHECK(graphs() == before + 1);
+  CHECK(timer() == 0);
+  before = graphs();
+  fixture.engine.syncGraph();
+  CHECK(graphs() == before + 1);
+  CHECK(timer() == 0);
+  // The listener the projection keeps on every engine track does nothing
+  // with what it is told, and asks for no graph.
+  auto &engineTrack = *projection.tracks().at(other).track;
+  bool used = false;
+  engineTrack.getListeners().call(
+      &tracktion::AudioTrack::Listener::injectLiveMidiMessage, engineTrack,
+      tracktion::MidiMessageWithSource(juce::MidiMessage::noteOff(1, 60),
+                                       tracktion::MPESourceID{}),
+      used);
+  engineTrack.getListeners().call(
+      &tracktion::AudioTrack::Listener::recordedMidiMessageSentToPlugins,
+      engineTrack, juce::MidiMessage::noteOff(1, 60));
+  CHECK(timer() == 0);
+
+  // Setting the project anew while playing builds once, with new
+  // sequencers.
+  fixture.engine.setProject(fixture.project(), fixture.scratch);
+  CHECK(graphs() == 1);
+  CHECK(timer() == 0);
   CHECK(fixture.assertions.count() == 0);
 }
 
@@ -687,134 +769,5 @@ TEST_CASE("a sounding note whose end is moved plays to its new end",
   const auto longer = fixture.playAcross(editFrame, totalFrames, resize(7));
   CHECK(lastSoundingFrame(longer.channels.at(0)) == (7 * quarter) + delay - 1);
   CHECK(identical(longer, fixture.playFromStart(sampleRate, totalFrames)));
-  CHECK(fixture.assertions.count() == 0);
-}
-
-TEST_CASE("the note guard ends what its schedule does not hold, block by "
-          "block",
-          "[projection][live]") {
-  // The guard of a real track, driven by hand with blocks of its own.
-  namespace te = tracktion;
-  StaleFixture fixture("projection-live-guard");
-  const auto &projection =
-      internal::TracktionAccess::projection(fixture.engine);
-  auto &guard = *projection.tracks().at(fixture.track).guard;
-  CHECK(guard.getName() == "LINA note guard");
-  CHECK(guard.getPluginType() == internal::NoteGuardPlugin::xmlTypeName);
-  CHECK(guard.getSelectableDescription() == "LINA note guard");
-  CHECK(guard.takesMidiInput());
-  // Playing a block gives the guard its sample rate, 48 kHz.
-  fixture.engine.openManualDevice({.sampleRate = sampleRate, .blockSize = 512});
-  fixture.engine.play();
-  std::ignore = fixture.engine.process(512);
-  fixture.engine.stop();
-
-  const auto block = [&](te::MidiMessageArray *messages, std::int64_t frame,
-                         bool playing) {
-    const te::PluginRenderContext context(
-        nullptr, juce::AudioChannelSet::stereo(), 0, 512, messages, 0.0,
-        {te::TimePosition::fromSamples(frame, sampleRate),
-         te::TimePosition::fromSamples(frame + 512, sampleRate)},
-        playing, false, false, false);
-    guard.applyToBuffer(context);
-  };
-  const auto noteOn = [](int pitch) {
-    return juce::MidiMessage::noteOn(1, pitch, juce::uint8{100});
-  };
-  // What a block holds, as text: "off 60", "on 62", "other".
-  const auto text = [](const te::MidiMessageArray &messages) {
-    std::string all;
-    for (const auto &message : messages) {
-      if (message.isNoteOn()) {
-        all += "on ";
-      } else if (message.isNoteOff()) {
-        all += "off ";
-      } else {
-        all += "other ";
-      }
-      all += std::to_string(message.getNoteNumber()) + ",";
-    }
-    return all;
-  };
-
-  // A block without a MIDI buffer is left alone.
-  block(nullptr, 1'000, true);
-  // Without a watch everything passes: two notes start.
-  te::MidiMessageArray messages;
-  messages.addMidiMessage(noteOn(60), 0.001, {});
-  messages.addMidiMessage(noteOn(61), 0.002, {});
-  block(&messages, 1'000, true);
-  CHECK(text(messages) == "on 60,on 61,");
-  CHECK(!guard.isWatching());
-
-  // A watch against a schedule that holds pitch 61 until frame 5000 and
-  // nothing else.
-  internal::ClipEvents clip;
-  clip.events = {
-      {.frame = 0, .pitch = 61, .velocity = 100},
-      {.frame = 5'000, .pitch = 61, .velocity = 0},
-  };
-  const std::array<const internal::ClipEvents *, 1> clips{&clip};
-  guard.watch(std::make_shared<const internal::NoteSchedule>(clips));
-  CHECK(guard.isWatching());
-  // While the transport does not play, nothing is ended.
-  messages.clear();
-  block(&messages, 2'000, false);
-  CHECK(text(messages).empty());
-  // The next playing block ends pitch 60 at its start, ahead of what the
-  // block holds, and leaves pitch 61 to its own end. Pitch 40 is the note
-  // the fixture's clip started in the block the engine played.
-  messages.clear();
-  messages.addMidiMessage(juce::MidiMessage::controllerEvent(1, 7, 100), 0.001,
-                          {});
-  messages.addMidiMessage(noteOn(62), 0.002, {});
-  block(&messages, 2'000, true);
-  CHECK(text(messages) == "off 40,off 60,other 7,on 62,");
-  CHECK(messages.begin()->getTimeStamp() == 0.0);
-  CHECK(!messages.isAllNotesOff);
-  // The rebuilt graph has not been handed over: the watch goes on. Pitch 62
-  // was started since and is not in the schedule either; the one buffer
-  // with room is used up, so the instrument is told to end everything.
-  messages.clear();
-  block(&messages, 2'512, true);
-  CHECK(text(messages).empty());
-  CHECK(messages.isAllNotesOff);
-  CHECK(guard.isWatching());
-  // Nothing is sounding now: the next block ends nothing.
-  messages.clear();
-  block(&messages, 3'024, true);
-  CHECK(text(messages).empty());
-  CHECK(!messages.isAllNotesOff);
-
-  // A new watch brings a new buffer with room. A block that holds more
-  // than the buffer has room for gets the flag instead.
-  messages.addMidiMessage(noteOn(70), 0.0, {});
-  block(&messages, 3'536, true);
-  guard.watch(std::make_shared<const internal::NoteSchedule>(clips));
-  messages.clear();
-  for (int index = 0; index < internal::NoteGuardPlugin::bufferRoom; ++index) {
-    messages.addMidiMessage(juce::MidiMessage::controllerEvent(1, 7, 1), 0.001,
-                            {});
-  }
-  block(&messages, 4'048, true);
-  CHECK(messages.size() == internal::NoteGuardPlugin::bufferRoom);
-  CHECK(messages.isAllNotesOff);
-
-  // Once the graph is handed over the watch ends after a few blocks.
-  guard.graphHandedOver();
-  for (int count = 0; count < internal::NoteGuardPlugin::settleBlocks;
-       ++count) {
-    CHECK(guard.isWatching());
-    messages.clear();
-    block(&messages, 4'560 + (512 * count), true);
-  }
-  CHECK(!guard.isWatching());
-  // Handing over without a watch changes nothing.
-  guard.graphHandedOver();
-  CHECK(!guard.isWatching());
-  // A watch that is forgotten is over at once.
-  guard.watch(std::make_shared<const internal::NoteSchedule>(clips));
-  guard.forget();
-  CHECK(!guard.isWatching());
   CHECK(fixture.assertions.count() == 0);
 }

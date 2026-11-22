@@ -25,6 +25,7 @@ void registerTestPlugins(Engine &engine) {
   auto &plugins = internal::TracktionAccess::engine(engine).getPluginManager();
   plugins.createBuiltInType<ToneInstrument>();
   plugins.createBuiltInType<DelayGainEffect>();
+  plugins.createBuiltInType<MidiProbe>();
   registerTestDeviceBindings(internal::TracktionAccess::devices(engine));
 }
 

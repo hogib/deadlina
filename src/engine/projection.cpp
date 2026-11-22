@@ -4,7 +4,6 @@
 #include "lina/engine/internal/mixing.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <stdexcept>
 #include <utility>
 
@@ -19,40 +18,8 @@ using model::ObjectKind;
 using model::Property;
 using model::PropertySet;
 
-/// Event times are handed to the engine this far into their sample frame:
-/// note-offs an eighth of a frame, note-ons three eighths.
-///
-/// The engine places an event by subtracting two times in seconds, which
-/// loses up to a few millionths of a frame at the end of the timeline (one
-/// unit in the last place of 171,000 seconds is 6e-6 frames at 192 kHz).
-/// Being well inside the frame keeps that from moving an event across a
-/// frame or block boundary, whether the receiver rounds or truncates. Being
-/// a quarter of a frame apart keeps a note-off before a note-on of the same
-/// frame when two clips meet: their events come from two nodes of the
-/// engine and are merged by time, and with equal times the noise would
-/// decide the order and could end the new note as it starts.
-constexpr double noteOffOffsetFrames = 0.125;
-constexpr double noteOnOffsetFrames = 0.375;
-
-/// The engine starts notes that are sounding at a block's start again when
-/// that block begins within 0.00001 seconds of a MIDI clip's start, and it
-/// stops handing out a clip's events with the block that reaches the clip's
-/// end. The engine clip of a MIDI clip therefore begins and ends this much
-/// outside the range its events lie in.
-constexpr double midiGuardSeconds = 0.0002;
-
 /// The level the engine treats as silence.
 constexpr float engineSilenceDb = -100.0F;
-
-/// Notes carry no channel in the document
-/// (docs/design/08-midi-clips-and-note-editing.md); the engine gets them all
-/// on this one.
-constexpr int midiChannel = 1;
-
-std::int64_t midiGuardFrames(double sampleRate) {
-  return static_cast<std::int64_t>(std::ceil(midiGuardSeconds * sampleRate)) +
-         2;
-}
 
 float engineDb(double db) {
   return db <= model::silenceDb ? engineSilenceDb : static_cast<float>(db);
@@ -182,8 +149,8 @@ void Projection::Pending::see(const model::Change &change) {
 }
 
 void Projection::Pending::seeProject(const model::Change &change) {
-  // The project has one entry at most.
-  timing = touches(change, {Property::Tempo, Property::TimeSignature});
+  // The project has one entry at most. The time signature is not projected.
+  timing = touches(change, {Property::Tempo});
   if (touches(change, {Property::TrackOrder, Property::ReturnOrder})) {
     trackList = true;
     allChains = true;
@@ -278,8 +245,6 @@ void Projection::buildAll(const model::Project &project) {
     throw;
   }
   forgetUnusedFiles();
-  watchChangedTracks();
-  graphStale_ = true;
   edit_->getUndoManager().clearUndoHistory();
   built_ = true;
 }
@@ -336,7 +301,6 @@ void Projection::applyChanges(const model::Project &project,
     orderTracks(project);
   }
   forgetUnusedFiles();
-  watchChangedTracks();
   edit_->getUndoManager().clearUndoHistory();
 }
 
@@ -346,7 +310,6 @@ void Projection::setSampleRate(double sampleRate) {
   }
   sampleRate_ = sampleRate;
   placeAllClips();
-  changedMidiTracks_.clear();
   edit_->getUndoManager().clearUndoHistory();
 }
 
@@ -365,12 +328,14 @@ void Projection::clear() {
 void Projection::releaseEngineObjects() {
   built_ = false;
   clips_.clear();
-  midiClips_.clear();
   devices_.clear();
+  for (const auto &[id, entry] : tracks_) {
+    entry.track->removeListener(&quietListener_);
+  }
   tracks_.clear();
   masterStrip_ = nullptr;
   files_.clear();
-  changedMidiTracks_.clear();
+  unpublished_.clear();
 }
 
 void Projection::setEngineDefaults() {
@@ -384,15 +349,14 @@ void Projection::setEngineDefaults() {
   edit_->masterFadeOut = te::TimeDuration{};
   edit_->clickTrackEnabled = false;
   edit_->getTransport().looping = false;
+  auto *signature = edit_->tempoSequence.getTimeSig(0);
+  signature->numerator = 4;
+  signature->denominator = 4;
 }
 
 void Projection::setTiming(const model::Project &project) {
   tempo_ = project.tempo;
-  const auto &tempo = edit_->tempoSequence;
-  tempo.getTempo(0)->setBpm(project.tempo.beatsPerMinute());
-  auto *signature = tempo.getTimeSig(0);
-  signature->numerator = project.timeSignature.numerator();
-  signature->denominator = project.timeSignature.denominator();
+  edit_->tempoSequence.getTempo(0)->setBpm(project.tempo.beatsPerMinute());
 }
 
 void Projection::createMissingTracks(const model::Project &project) {
@@ -406,9 +370,11 @@ void Projection::createMissingTracks(const model::Project &project) {
         te::TrackInsertPoint(nullptr, te::getTopLevelTracks(*edit_).getLast()),
         nullptr, false);
     requireMade(entry.track != nullptr, "a track");
+    entry.track->addListener(&quietListener_);
     auto &list = entry.track->pluginList;
     if (track.kind == model::TrackKind::Midi) {
-      entry.guard = insertOwn<NoteGuardPlugin>(list, "a note guard");
+      entry.sequencer = insertOwn<SequencerPlugin>(list, "a sequencer");
+      unpublished_.insert(track.id);
     }
     if (track.kind == model::TrackKind::Return) {
       entry.bus = nextBus_++;
@@ -430,6 +396,7 @@ void Projection::removeGoneTracks(const model::Project &project) {
     if (model::findTrack(project, item.first) != nullptr) {
       return false;
     }
+    item.second.track->removeListener(&quietListener_);
     edit_->deleteTrack(item.second.track.get());
     return true;
   });
@@ -470,8 +437,8 @@ void Projection::syncChain(const model::Project &project,
   TrackEntry &entry = tracks_.at(track.id);
   auto &list = entry.track->pluginList;
   std::vector<te::Plugin *> wanted;
-  if (entry.guard != nullptr) {
-    wanted.push_back(entry.guard.get());
+  if (entry.sequencer != nullptr) {
+    wanted.push_back(entry.sequencer.get());
   }
   if (entry.input != nullptr) {
     wanted.push_back(entry.input.get());
@@ -620,36 +587,52 @@ void Projection::syncClips(const model::Project &project,
 void Projection::syncClip(const model::Project &project,
                           const model::Track &track, const model::Clip &clip) {
   ClipEntry &entry = clips_[clip.id];
+  if (const auto *midi = std::get_if<model::MidiContent>(&clip.content)) {
+    syncMidiClip(clip.id, entry, track,
+                 {
+                     .extent = clip.extent,
+                     .loop = clip.loop,
+                     .notes = midi->notes,
+                 });
+    return;
+  }
   if (entry.track != track.id) {
     removeParts(entry);
     entry.track = track.id;
   }
-  if (const auto *midi = std::get_if<model::MidiContent>(&clip.content)) {
-    MidiClipContent content{
-        .extent = clip.extent,
-        .loop = clip.loop,
-        .notes = midi->notes,
-    };
-    // A change of name or colour leaves what the clip plays as it was.
-    if (entry.parts.empty() ||
-        std::get<MidiClipContent>(entry.content) != content) {
-      entry.content = std::move(content);
-      entry.events = nullptr;
-      changedMidiTracks_.insert(track.id);
-      graphStale_ = true;
-    }
-  } else {
-    const auto &audio = std::get<model::AudioContent>(clip.content);
-    const model::MediaReference &media = mediaOf(project, audio.media);
-    setFile(entry, mediaFile(media));
-    entry.content = AudioClipContent{
-        .extent = clip.extent,
-        .loop = clip.loop,
-        .audio = audio,
-        .fileSampleRate = media.sampleRate,
-    };
-  }
+  const auto &audio = std::get<model::AudioContent>(clip.content);
+  const model::MediaReference &media = mediaOf(project, audio.media);
+  setFile(entry, mediaFile(media));
+  entry.content = AudioClipContent{
+      .extent = clip.extent,
+      .loop = clip.loop,
+      .audio = audio,
+      .fileSampleRate = media.sampleRate,
+  };
   placeClip(clip.id, entry);
+}
+
+void Projection::syncMidiClip(model::ClipId id, ClipEntry &entry,
+                              const model::Track &track,
+                              MidiClipContent content) {
+  // A clip new to the projection has no playback yet.
+  const bool known = entry.playback != nullptr && entry.track == track.id;
+  if (!known) {
+    leaveTrack(id, entry);
+    entry.track = track.id;
+  }
+  // A change of name or colour leaves what the clip plays as it was.
+  if (!known || std::get<MidiClipContent>(entry.content) != content) {
+    entry.content = std::move(content);
+    placeClip(id, entry);
+  }
+}
+
+void Projection::leaveTrack(model::ClipId id, const ClipEntry &entry) {
+  const auto found = tracks_.find(entry.track);
+  if (found != tracks_.end() && found->second.midiClips.erase(id) > 0) {
+    unpublished_.insert(entry.track);
+  }
 }
 
 void Projection::removeClip(model::ClipId clip) {
@@ -658,19 +641,14 @@ void Projection::removeClip(model::ClipId clip) {
     return;
   }
   removeParts(found->second);
+  leaveTrack(clip, found->second);
   filesChanged_ =
       filesChanged_ || !found->second.file.getFullPathName().isEmpty();
   clips_.erase(found);
 }
 
 void Projection::removeParts(ClipEntry &entry) {
-  if (std::holds_alternative<MidiClipContent>(entry.content) &&
-      !entry.parts.empty()) {
-    changedMidiTracks_.insert(entry.track);
-    graphStale_ = true;
-  }
   for (const te::Clip::Ptr &part : entry.parts) {
-    midiClips_.erase(part->itemID.getRawID());
     part->removeFromParent();
   }
   entry.parts.clear();
@@ -686,40 +664,12 @@ void Projection::setFile(ClipEntry &entry, const juce::File &file) {
 
 void Projection::placeClip(model::ClipId id, ClipEntry &entry) {
   if (const auto *midi = std::get_if<MidiClipContent>(&entry.content)) {
-    placeMidiClip(id, entry, *midi);
+    entry.playback = std::make_shared<const ClipPlayback>(*midi, timeMap());
+    tracks_.at(entry.track).midiClips.insert(id);
+    unpublished_.insert(entry.track);
   } else {
     placeAudioClip(entry, std::get<AudioClipContent>(entry.content));
   }
-}
-
-void Projection::placeMidiClip(model::ClipId id, ClipEntry &entry,
-                               const MidiClipContent &content) {
-  const TimeMap time = timeMap();
-  const std::int64_t clipStart = content.extent.position.ticks;
-  const std::int64_t start = time.frame(clipStart);
-  const std::int64_t end = std::min(
-      time.frame(clipStart + content.extent.length.ticks), time.horizonFrame());
-  if (start >= end) {
-    removeParts(entry);
-    return;
-  }
-  const std::int64_t guard = midiGuardFrames(sampleRate_);
-  entry.originFrame = std::max<std::int64_t>(0, start - guard);
-  const te::TimeRange range(
-      te::TimePosition::fromSeconds(time.frameSeconds(entry.originFrame)),
-      te::TimePosition::fromSeconds(time.frameSeconds(end + guard)));
-  if (entry.parts.empty()) {
-    const auto clip =
-        tracks_.at(entry.track).track->insertMIDIClip({}, range, nullptr);
-    requireMade(clip != nullptr, "a MIDI clip");
-    // The engine's choice between event times in seconds and in beats hangs
-    // on this switch; playbackSequence() answers in seconds.
-    clip->setUsesProxy(true);
-    midiClips_.emplace(clip->itemID.getRawID(), id);
-    entry.parts.emplace_back(clip.get());
-    changedMidiTracks_.insert(entry.track);
-  }
-  entry.parts.front()->setPosition({.time = range, .offset = {}});
 }
 
 void Projection::placeAudioClip(ClipEntry &entry,
@@ -795,11 +745,7 @@ void Projection::placeAudioClip(ClipEntry &entry,
 void Projection::placeAllClips() {
   for (auto &[id, entry] : clips_) {
     placeClip(id, entry);
-    if (std::holds_alternative<MidiClipContent>(entry.content)) {
-      changedMidiTracks_.insert(entry.track);
-    }
   }
-  graphStale_ = true;
 }
 
 void Projection::relink(const model::Project &project,
@@ -912,96 +858,38 @@ std::vector<MediaReport> Projection::mediaProblems() const {
   return list;
 }
 
-std::shared_ptr<const ClipEvents>
-Projection::eventsOf(const ClipEntry &entry) const {
-  const TimeMap time = timeMap();
-  if (entry.events == nullptr || entry.eventsTime != time) {
-    entry.events = std::make_shared<const ClipEvents>(
-        noteEvents(std::get<MidiClipContent>(entry.content), time));
-    entry.eventsTime = time;
-  }
-  return entry.events;
-}
-
 std::vector<model::ClipId> Projection::truncatedClips() const {
   std::vector<model::ClipId> clips;
   for (const auto &[id, entry] : clips_) {
-    if (std::holds_alternative<MidiClipContent>(entry.content) &&
-        eventsOf(entry)->truncated) {
+    if (entry.playback != nullptr && entry.playback->events().truncated) {
       clips.push_back(id);
     }
   }
   return clips;
 }
 
-void Projection::watchChangedTracks() {
-  const std::set<model::TrackId> changed =
-      std::exchange(changedMidiTracks_, {});
-  if (changed.empty() || !edit_->getTransport().isPlaying()) {
-    return;
-  }
-  // Everything the changed tracks play now, by track. They are MIDI
-  // tracks, so every clip on them is a MIDI clip.
-  std::map<model::TrackId, std::vector<std::shared_ptr<const ClipEvents>>>
-      played;
-  for (const auto &[id, entry] : clips_) {
-    if (changed.contains(entry.track) && !entry.parts.empty()) {
-      played[entry.track].push_back(eventsOf(entry));
-    }
-  }
-  for (const model::TrackId track : changed) {
-    const auto entry = tracks_.find(track);
-    if (entry == tracks_.end()) {
+void Projection::publish() {
+  for (const model::TrackId id : std::exchange(unpublished_, {})) {
+    const auto track = tracks_.find(id);
+    // Only MIDI tracks are listed; one that is gone has nothing to play.
+    if (track == tracks_.end()) {
       continue;
     }
-    std::vector<const ClipEvents *> clips;
-    for (const auto &events : played[track]) {
-      clips.push_back(events.get());
+    std::vector<SequencedClip> clips;
+    clips.reserve(track->second.midiClips.size());
+    for (const model::ClipId clip : track->second.midiClips) {
+      clips.push_back({.clip = clip, .playback = clips_.at(clip).playback});
     }
-    entry->second.guard->watch(std::make_shared<const NoteSchedule>(clips));
+    track->second.sequencer->publish(std::move(clips), sampleRate_);
   }
 }
 
-void Projection::graphHandedOver() {
+void Projection::playbackStarting() {
   for (const auto &[id, entry] : tracks_) {
-    if (entry.guard != nullptr) {
-      entry.guard->graphHandedOver();
+    if (entry.sequencer != nullptr) {
+      entry.sequencer->requestStart();
     }
   }
-}
-
-void Projection::playbackRestarted() {
-  changedMidiTracks_.clear();
-  for (const auto &[id, entry] : tracks_) {
-    if (entry.guard != nullptr) {
-      entry.guard->forget();
-    }
-  }
-}
-
-std::optional<juce::MidiMessageSequence>
-Projection::playbackSequence(const te::MidiClip &clip) const {
-  const auto known = midiClips_.find(clip.itemID.getRawID());
-  if (known == midiClips_.end()) {
-    return std::nullopt;
-  }
-  ++sequenceRequests_;
-  const ClipEntry &entry = clips_.at(known->second);
-  const std::shared_ptr<const ClipEvents> events = eventsOf(entry);
-  juce::MidiMessageSequence sequence;
-  for (const NoteEvent &event : events->events) {
-    const auto frames = static_cast<double>(event.frame - entry.originFrame);
-    if (event.isNoteOn()) {
-      sequence.addEvent(
-          juce::MidiMessage::noteOn(midiChannel, event.pitch,
-                                    static_cast<juce::uint8>(event.velocity)),
-          (frames + noteOnOffsetFrames) / sampleRate_);
-    } else {
-      sequence.addEvent(juce::MidiMessage::noteOff(midiChannel, event.pitch),
-                        (frames + noteOffOffsetFrames) / sampleRate_);
-    }
-  }
-  return sequence;
 }
 
 } // namespace lina::engine::internal

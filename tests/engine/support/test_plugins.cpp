@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <iterator>
 #include <memory>
 #include <numbers>
 #include <span>
@@ -62,6 +64,16 @@ public:
   }
 };
 
+class MidiProbeBinding final : public internal::DeviceBinding {
+public:
+  [[nodiscard]] juce::ValueTree
+  createState([[maybe_unused]] const model::Device &device) const override {
+    return MidiProbe::create();
+  }
+  void apply([[maybe_unused]] te::Plugin &plugin,
+             [[maybe_unused]] const model::Device &device) const override {}
+};
+
 model::Device testDevice(model::DeviceRole role, const char *identifier) {
   model::Device device;
   device.role = role;
@@ -94,11 +106,17 @@ model::Device delayGainDevice(int delayFrames, float gain) {
   return device;
 }
 
+model::Device midiProbeDevice() {
+  return testDevice(model::DeviceRole::AudioEffect, MidiProbe::xmlTypeName);
+}
+
 void registerTestDeviceBindings(internal::DeviceRegistry &registry) {
   registry.add(testPluginFormat, ToneInstrument::xmlTypeName,
                std::make_unique<ToneBinding>());
   registry.add(testPluginFormat, DelayGainEffect::xmlTypeName,
                std::make_unique<DelayGainBinding>());
+  registry.add(testPluginFormat, MidiProbe::xmlTypeName,
+               std::make_unique<MidiProbeBinding>());
 }
 
 ToneInstrument::ToneInstrument(const te::PluginCreationInfo &info)
@@ -265,6 +283,62 @@ void DelayGainEffect::applyToBuffer(const te::PluginRenderContext &context)
     }
   }
   position_ = position;
+}
+
+MidiProbe::MidiProbe(const te::PluginCreationInfo &info)
+    : Plugin(info), notes_(capacity) {}
+
+MidiProbe::~MidiProbe() { notifyListenersOfDeletion(); }
+
+juce::ValueTree MidiProbe::create() {
+  return te::createValueTree(te::IDs::PLUGIN, te::IDs::type, xmlTypeName);
+}
+
+std::vector<MidiProbe::Note> MidiProbe::take() {
+  const std::size_t count = count_.exchange(0);
+  return {notes_.begin(),
+          std::next(notes_.begin(), static_cast<std::ptrdiff_t>(count))};
+}
+
+void MidiProbe::initialise(const te::PluginInitialisationInfo &info) {
+  sampleRate_ = info.sampleRate;
+}
+
+void MidiProbe::deinitialise() {}
+
+void MidiProbe::record(const Note &note) [[clang::nonblocking]] {
+  const std::size_t index = count_.load();
+  if (index >= notes_.size()) {
+    overflowed_ = true;
+    return;
+  }
+  notes_.at(index) = note;
+  count_.store(index + 1);
+}
+
+void MidiProbe::applyToBuffer(const te::PluginRenderContext &context)
+    [[clang::nonblocking]] {
+  const auto *messages = context.bufferForMidiMessages;
+  if (messages == nullptr) {
+    return;
+  }
+  const double sampleRate = sampleRate_.load();
+  const std::int64_t start =
+      te::toSamples(context.editTime.getStart(), sampleRate);
+  lastBlockStart_.store(start);
+  if (messages->isAllNotesOff) {
+    record({.frame = start, .allNotesOff = true, .playing = context.isPlaying});
+  }
+  for (const auto &message : *messages) {
+    if (message.isNoteOnOrOff()) {
+      record({
+          .frame = start + std::llround(message.getTimeStamp() * sampleRate),
+          .pitch = message.getNoteNumber(),
+          .velocity = message.isNoteOn() ? message.getVelocity() : 0,
+          .playing = context.isPlaying,
+      });
+    }
+  }
 }
 
 } // namespace lina::engine::testing

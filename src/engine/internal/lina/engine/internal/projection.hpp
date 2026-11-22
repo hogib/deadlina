@@ -13,24 +13,38 @@
 //     (volume, pan, mute and solo), one send per return track in return
 //     order, and a second gain that silences the track's direct output when
 //     another track's solo calls for that while the sends keep running. A
-//     MIDI track has a note guard in front of all of them.
+//     MIDI track has LINA's sequencer (sequencer.hpp) in front of all of them.
 //   - The plugins of a return track are the engine's bus input, its devices
 //     and the strip gain.
 //   - The master's devices and its strip gain are the edit's master plugins.
 //     The engine's own master volume stays at unity.
-//   - A MIDI clip is one engine clip that only marks a time range; what it
-//     plays comes from playbackSequence(). An audio clip is up to two engine
-//     clips (audio_parts.hpp). A clip in a session slot has none.
+//   - An audio clip is up to two engine clips (audio_parts.hpp). A MIDI clip
+//     has no engine clip: what it plays is worked out here (sequence.hpp) and
+//     handed to the sequencer of its track by publish(). A clip in a session
+//     slot has nothing.
+//   - The engine's tempo is the document's, for the devices that follow it.
+//     Its time signature stays at 4/4: nothing in the engine is meant to use
+//     it (a beat is a quarter note, the click is off), and a change of it would
+//     make the engine rebuild its playback graph.
 //
 // Every time the engine is given is on a sample frame of the open device
 // (time_map.hpp), so the projection has to be told the device's sample rate.
 //
-// Edits while playing. The first plugin of every MIDI track is a note guard
-// (note_guard.hpp), which ends the notes an edit leaves without a note-off.
-// A clip that comes to a track while playing (added, moved there, undone
-// back) is new to the engine, which starts the notes sounding at the
-// playhead. A note that an edit puts under the playhead inside a clip that
-// is already playing is not started; it is heard from its next start.
+// Edits while playing. An edit of notes, of MIDI clips or of the mixer changes
+// nothing in the engine's edit that would make it rebuild its playback graph:
+// the projection works out what the MIDI tracks it touched play now, and the
+// mixer's levels are values the audio thread reads. What the sequencer does
+// with a new sequence while playing is NotePlayer's (note_player.hpp): a note
+// that has lost its end is ended, and a note that an edit puts under the
+// playhead is heard from its next start. Edits of audio clips, devices,
+// tracks, sends and the tempo change the engine's edit, and the engine
+// rebuilds its graph.
+//
+// Graph builds. The engine asks for one more rebuild of its graph whenever it
+// builds a graph that holds a track without listeners (AudioTrack::addListener,
+// called by each track's live MIDI node), which is every graph built from
+// nothing, as for play. The projection keeps a listener of its own on every
+// engine track, which does nothing, so that the engine never asks.
 //
 // Audio files. A file is looked at when a clip first uses its path: whether
 // it is there, whether it is audio the engine can map into memory, and what
@@ -63,7 +77,8 @@
 #include "lina/engine/internal/device_registry.hpp"
 #include "lina/engine/internal/engine_plugins.hpp"
 #include "lina/engine/internal/midi_events.hpp"
-#include "lina/engine/internal/note_guard.hpp"
+#include "lina/engine/internal/sequence.hpp"
+#include "lina/engine/internal/sequencer.hpp"
 #include "lina/engine/internal/time_map.hpp"
 #include "lina/engine/project_report.hpp"
 #include "lina/model/change_set.hpp"
@@ -96,8 +111,9 @@ public:
   struct TrackEntry {
     model::TrackKind kind{model::TrackKind::Audio};
     tracktion::AudioTrack::Ptr track;
-    /// MIDI tracks only: first in the chain.
-    NoteGuardPlugin::Ptr guard;
+    /// MIDI tracks only: first in the chain, and the clips it plays.
+    SequencerPlugin::Ptr sequencer;
+    std::set<model::ClipId> midiClips;
     StripGainPlugin::Ptr strip;
     /// Audio and MIDI tracks only: the gain after the sends.
     StripGainPlugin::Ptr output;
@@ -133,21 +149,12 @@ public:
     std::variant<MidiClipContent, AudioClipContent> content;
     /// Audio clips only: the file played.
     juce::File file;
-    /// The engine clips, in playing order. Empty when nothing of the clip
-    /// can be played: it lies behind the engine's horizon, or its file is
-    /// not playable.
+    /// Audio clips only: the engine clips, in playing order. Empty when
+    /// nothing of the clip can be played: it lies behind the engine's
+    /// horizon, or its file is not playable.
     std::vector<tracktion::Clip::Ptr> parts;
-    /// MIDI clips only: the frame the engine clip starts on, from which its
-    /// event times count.
-    std::int64_t originFrame{0};
-
-  private:
-    friend class Projection;
-    /// MIDI clips only: what the content plays under one time map, kept so
-    /// that a clip nobody touched is not worked out again. Nothing but a
-    /// memory of a pure function's result.
-    mutable std::shared_ptr<const ClipEvents> events;
-    mutable std::optional<TimeMap> eventsTime;
+    /// MIDI clips only: what the clip plays under the current time map.
+    std::shared_ptr<const ClipPlayback> playback;
   };
 
   /// A projection of nothing yet: attach() gives it its edit.
@@ -172,18 +179,20 @@ public:
   /// positive. Changing it moves every clip onto the new sample grid.
   void setSampleRate(double sampleRate);
 
-  /// True, once, when what MIDI clips play has changed in a way the engine
-  /// cannot see in its edit: the playback graph has to be rebuilt.
-  [[nodiscard]] bool takeGraphStale() {
-    return std::exchange(graphStale_, false);
-  }
+  /// Hands the sequencer of every MIDI track whose clips have changed since
+  /// the last call what the track plays now. The Engine calls it at the end
+  /// of every call that changes the projection, after the engine's playback
+  /// graph has been rebuilt for it. With the manual device, which runs no
+  /// block in between, the new graph and the new sequences are taken up by
+  /// the same block. With a real device the engine may hand the audio thread
+  /// the new graph before this runs; the sequencers then play the old
+  /// sequences for that block, and NotePlayer reconciles what sounds with the
+  /// new sequence at the next block, so no note is left hanging.
+  void publish();
 
-  /// To be called when the rebuilt playback graph has been handed to the
-  /// audio thread: the note guards stop watching soon after.
-  void graphHandedOver();
-
-  /// To be called when playback starts anew, with the playback graph down.
-  void playbackRestarted();
+  /// To be called when playback starts anew, with the playback graph down:
+  /// the first block played chases the notes sounding across it.
+  void playbackStarting();
 
   /// Lets go of every engine object without touching the edit, which is
   /// about to be destroyed.
@@ -191,15 +200,6 @@ public:
 
   [[nodiscard]] bool isBuilt() const { return built_; }
   [[nodiscard]] TimeMap timeMap() const { return {tempo_, sampleRate_}; }
-
-  /// What a projected MIDI clip plays, with times in seconds from the start
-  /// of the engine clip; empty for a clip the projection did not make.
-  [[nodiscard]] std::optional<juce::MidiMessageSequence>
-  playbackSequence(const tracktion::MidiClip &clip) const;
-
-  /// The events of a projected MIDI clip under the current time map.
-  [[nodiscard]] std::shared_ptr<const ClipEvents>
-  eventsOf(const ClipEntry &entry) const;
 
   /// The media references of arrangement clips whose file is not as the
   /// document says, in order of identity.
@@ -227,14 +227,21 @@ public:
   [[nodiscard]] const std::map<std::string, FileState> &files() const {
     return files_;
   }
-  /// How often the engine has asked for a clip's events, which it does once
-  /// per MIDI clip whenever it rebuilds its playback graph.
-  [[nodiscard]] std::uint64_t sequenceRequests() const {
-    return sequenceRequests_;
-  }
 
 private:
   struct Pending;
+
+  /// Listens to an engine track and does nothing (see "Graph builds").
+  class QuietListener final : public tracktion::AudioTrack::Listener {
+  public:
+    void injectLiveMidiMessage(
+        [[maybe_unused]] tracktion::AudioTrack &track,
+        [[maybe_unused]] const tracktion::MidiMessageWithSource &message,
+        [[maybe_unused]] bool &wasUsed) override {}
+    void recordedMidiMessageSentToPlugins(
+        [[maybe_unused]] tracktion::AudioTrack &track,
+        [[maybe_unused]] const juce::MidiMessage &message) override {}
+  };
 
   void applyChanges(const model::Project &project,
                     const model::ChangeSet &changes);
@@ -265,11 +272,13 @@ private:
   void syncClip(const model::Project &project, const model::Track &track,
                 const model::Clip &clip);
   void removeClip(model::ClipId clip);
-  void removeParts(ClipEntry &entry);
+  static void removeParts(ClipEntry &entry);
   void setFile(ClipEntry &entry, const juce::File &file);
+  void syncMidiClip(model::ClipId id, ClipEntry &entry,
+                    const model::Track &track, MidiClipContent content);
+  /// Takes a MIDI clip off the track it was on.
+  void leaveTrack(model::ClipId id, const ClipEntry &entry);
   void placeClip(model::ClipId id, ClipEntry &entry);
-  void placeMidiClip(model::ClipId id, ClipEntry &entry,
-                     const MidiClipContent &content);
   void placeAudioClip(ClipEntry &entry, const AudioClipContent &content);
   void placeAllClips();
   void relink(const model::Project &project,
@@ -277,9 +286,6 @@ private:
   [[nodiscard]] juce::File mediaFile(const model::MediaReference &media) const;
   const FileState &fileState(const juce::File &file);
   void forgetUnusedFiles();
-  /// Hands the note guards of the tracks whose MIDI changed what those
-  /// tracks play now, if anything is playing.
-  void watchChangedTracks();
 
   tracktion::Edit *edit_{nullptr};
   const DeviceRegistry *registry_;
@@ -292,16 +298,13 @@ private:
   std::map<model::DeviceId, DeviceEntry> devices_;
   std::map<model::ClipId, ClipEntry> clips_;
   StripGainPlugin::Ptr masterStrip_;
-  /// Engine clip to MIDI clip, for playbackSequence().
-  std::map<std::uint64_t, model::ClipId> midiClips_;
   std::map<std::string, FileState> files_;
   /// True when the set of files that audio clips play may have changed.
   bool filesChanged_{false};
-  /// The MIDI tracks whose notes changed since the guards were last told.
-  std::set<model::TrackId> changedMidiTracks_;
-  bool graphStale_{false};
+  /// The MIDI tracks whose clips changed since the last publish().
+  std::set<model::TrackId> unpublished_;
   int nextBus_{0};
-  mutable std::uint64_t sequenceRequests_{0};
+  QuietListener quietListener_;
 };
 
 } // namespace lina::engine::internal

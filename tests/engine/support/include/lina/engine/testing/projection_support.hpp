@@ -15,12 +15,13 @@ namespace lina::engine::testing {
 
 /// The state of the engine's edit as text, one line per thing, taken from
 /// the engine's own objects: tempo, tracks in order with their plugins and
-/// clips, levels, sends, and for every MIDI clip the events the engine will
-/// play. Objects are named by the LINA identity the projection maps to
-/// them, never by the engine's own identifiers, so that two edits that play
-/// the same document read the same however they were built. An engine
-/// object the projection does not account for, and an entry of the
-/// projection without its engine object, are listed as such.
+/// clips, levels, sends, and for every MIDI track the clips and events its
+/// sequencer was given last. Objects are named by the LINA identity the
+/// projection maps to them, never by the engine's own identifiers, so that
+/// two edits that play the same document read the same however they were
+/// built. An engine object the projection does not account for, and an
+/// entry of the projection without its engine object or missing from its
+/// track's sequence, are listed as such.
 std::string describeEdit(Engine &engine);
 
 /// Writes a 32-bit floating-point WAV file.

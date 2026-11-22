@@ -10,9 +10,12 @@ lina_add_library(lina_engine
     engine_plugins.cpp
     message_thread.cpp
     midi_events.cpp
+    midi_outlet.cpp
     mixing.cpp
-    note_guard.cpp
+    note_player.cpp
     projection.cpp
+    sequence.cpp
+    sequencer.cpp
     time_map.cpp
   PUBLIC_LIBRARIES
     lina::model

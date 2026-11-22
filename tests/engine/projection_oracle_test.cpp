@@ -531,12 +531,11 @@ std::int64_t settledFrame(Engine &engine, std::int64_t lastEdit, int block) {
   constexpr std::int64_t rampFrames = 40;
   std::int64_t settled = lastEdit + block + rampFrames + 1;
   for (const auto &[id, entry] : projection.clips()) {
-    if (!std::holds_alternative<internal::MidiClipContent>(entry.content)) {
+    if (entry.playback == nullptr) {
       continue;
     }
     std::array<std::int64_t, 128> startedOn{};
-    for (const internal::NoteEvent &event :
-         projection.eventsOf(entry)->events) {
+    for (const internal::NoteEvent &event : entry.playback->events().events) {
       if (event.isNoteOn()) {
         startedOn.at(event.pitch) = event.frame;
       } else if (startedOn.at(event.pitch) < lastEdit + block &&
@@ -546,6 +545,16 @@ std::int64_t settledFrame(Engine &engine, std::int64_t lastEdit, int block) {
     }
   }
   return settled;
+}
+
+/// No sequencer of `engine` let a block pass for want of room.
+void checkNothingDropped(Engine &engine) {
+  for (const auto &[id, entry] :
+       internal::TracktionAccess::projection(engine).tracks()) {
+    if (entry.sequencer != nullptr) {
+      CHECK(entry.sequencer->blocksDropped() == 0);
+    }
+  }
 }
 
 /// A sequence whose edits are made while the engine plays. After every step
@@ -573,6 +582,8 @@ void runLiveSequence(const Environment &environment, Tally &tally,
     if (step + 1 < steps) {
       const auto more =
           live.process(1 + static_cast<std::int64_t>(generator.below(1'500)));
+      INFO("after " << what);
+      checkNothingDropped(live);
       for (std::size_t channel = 0; channel < 2; ++channel) {
         auto &samples = stream.channels.at(channel);
         samples.insert(samples.end(), more.channels.at(channel).begin(),
@@ -593,6 +604,7 @@ void runLiveSequence(const Environment &environment, Tally &tally,
   const auto lastEdit = static_cast<std::int64_t>(stream.frameCount());
   const std::int64_t total = lastEdit + std::int64_t{80'000};
   const auto tail = live.process(total - lastEdit);
+  checkNothingDropped(live);
   const auto fromScratch = oracle.scratchEngine.renderOffline({
       .format = {.sampleRate = sampleRate, .blockSize = block},
       .startFrame = 0,
@@ -612,11 +624,13 @@ void runLiveSequence(const Environment &environment, Tally &tally,
                             .subspan(static_cast<std::size_t>(settled));
     audible = audible || firstSoundingFrame(wanted) != -1;
     // Tolerance: none.
-    if (!std::ranges::equal(heard, wanted)) {
+    const auto [differs, ignored] = std::ranges::mismatch(heard, wanted);
+    if (differs != heard.end()) {
       FAIL("seed " << seed << ": after edits while playing up to frame "
                    << lastEdit << ", the stream from frame " << settled
-                   << " is not the document's; largest difference "
-                   << maxDifference(heard, wanted));
+                   << " is not the document's, first at frame "
+                   << settled + (differs - heard.begin())
+                   << "; largest difference " << maxDifference(heard, wanted));
     }
   }
   tally.liveAudible += audible ? 1 : 0;

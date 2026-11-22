@@ -192,12 +192,14 @@ TEST_CASE("setting a project sets everything the engine would otherwise "
   CHECK(!edit.getTransport().looping.get());
   CHECK(edit.tempoSequence.getNumTempos() == 1);
   CHECK(edit.tempoSequence.getBpmAt({}) == 120.0);
-  CHECK(edit.tempoSequence.getTimeSig(0)->numerator.get() == 7);
-  CHECK(edit.tempoSequence.getTimeSig(0)->denominator.get() == 8);
+  // The document's 7/8 is not the engine's business; its own stays at 4/4.
+  CHECK(edit.tempoSequence.getNumTimeSigs() == 1);
+  CHECK(edit.tempoSequence.getTimeSig(0)->numerator.get() == 4);
+  CHECK(edit.tempoSequence.getTimeSig(0)->denominator.get() == 4);
   // The engine's own undo history is not used.
   CHECK(!edit.getUndoManager().canUndo());
-  // A new track has none of the engine's default plugins: only the note
-  // guard, the device and the projection's two gains.
+  // A new track has none of the engine's default plugins: only the
+  // sequencer, the device and the projection's two gains.
   const auto &entry =
       internal::TracktionAccess::projection(fixture.engine).tracks().at(track);
   CHECK(entry.track->pluginList.size() == 4);
@@ -347,8 +349,7 @@ TEST_CASE("what the projection does not play is ignored without a trace",
   CHECK(fixture.assertions.count() == 0);
 }
 
-TEST_CASE("a clip is in the engine while it is in the arrangement",
-          "[projection]") {
+TEST_CASE("a clip is played while it is in the arrangement", "[projection]") {
   ProjectionFixture fixture("projection-clip-places");
   fixture.edit(AddScene{.name = "A", .index = 0});
   const TrackId track = fixture.addToneTrack();
@@ -358,27 +359,29 @@ TEST_CASE("a clip is in the engine while it is in the arrangement",
                                           {makeNote(60, beat(0), beats(1))}));
   const auto &projection =
       internal::TracktionAccess::projection(fixture.engine);
-  const auto engineClips = [&](TrackId id) {
-    return projection.tracks().at(id).track->getClips().size();
+  // What the track's sequencer plays; the engine has no MIDI clips at all.
+  const auto played = [&](TrackId id) {
+    CHECK(projection.tracks().at(id).track->getClips().isEmpty());
+    return projection.tracks().at(id).sequencer->published()->clips().size();
   };
   REQUIRE(projection.clips().contains(clip));
   CHECK(projection.clips().at(clip).track == track);
-  CHECK(engineClips(track) == 1);
+  CHECK(played(track) == 1);
 
-  // Into a slot: gone from the engine.
+  // Into a slot: gone from what the track plays.
   const Track *owner = findTrack(fixture.project(), track);
   REQUIRE(owner != nullptr);
   const SlotId slot = owner->slots.at(0).id;
   fixture.edit(MoveClip{.clip = clip, .container = slot, .position = beat(0)});
   CHECK(!projection.clips().contains(clip));
-  CHECK(engineClips(track) == 0);
+  CHECK(played(track) == 0);
 
   // Back to an arrangement, on the other track.
   fixture.edit(MoveClip{.clip = clip, .container = other, .position = beat(1)});
   REQUIRE(projection.clips().contains(clip));
   CHECK(projection.clips().at(clip).track == other);
-  CHECK(engineClips(track) == 0);
-  CHECK(engineClips(other) == 1);
+  CHECK(played(track) == 0);
+  CHECK(played(other) == 1);
   const auto audio = fixture.playFromStart(48'000.0, 30'000);
   CHECK(firstSoundingFrame(audio.channels.at(0)) == 24'000);
 
@@ -390,13 +393,13 @@ TEST_CASE("a clip is in the engine while it is in the arrangement",
   fixture.editAll(gesture);
   REQUIRE(projection.clips().contains(clip));
   CHECK(projection.clips().at(clip).track == track);
-  CHECK(engineClips(track) == 1);
+  CHECK(played(track) == 1);
   const auto moved = fixture.playFromStart(48'000.0, 30'000);
   CHECK(firstSoundingFrame(moved.channels.at(0)) == 0);
 
   fixture.edit(RemoveClip{clip});
   CHECK(projection.clips().empty());
-  CHECK(engineClips(track) == 0);
+  CHECK(played(track) == 0);
   CHECK(fixture.assertions.count() == 0);
 }
 
@@ -419,12 +422,12 @@ TEST_CASE("clips move onto the sample grid of the device that plays them",
   const auto second = fixture.playFromStart(96'000.0, 140'000);
   CHECK(projection.timeMap().sampleRate() == 96'000.0);
   CHECK(firstSoundingFrame(second.channels.at(0)) == 129'603);
-  // The engine clip starts a little before its first event, on a frame.
-  const auto start =
-      projection.clips().at(clip).parts.front()->getPosition().getStart();
-  CHECK(start.inSeconds() * 96'000.0 ==
-        static_cast<double>(projection.clips().at(clip).originFrame));
-  CHECK(projection.clips().at(clip).originFrame < 129'603);
+  // What the track's sequencer plays was worked out for that rate.
+  const auto played = projection.tracks().at(track).sequencer->published();
+  CHECK(played->sampleRate() == 96'000.0);
+  REQUIRE(played->clips().size() == 1);
+  CHECK(played->clips().front().clip == clip);
+  CHECK(played->clips().front().playback->startFrame() == 129'603);
   CHECK(fixture.assertions.count() == 0);
 }
 
@@ -482,17 +485,18 @@ TEST_CASE("the description of an edit names what the projection does not "
   CHECK(contains(stray, "track not in the projection"));
   CHECK(contains(stray, "undo history: kept"));
 
-  // And an entry of the projection whose engine object has gone.
+  // And an entry of the projection whose engine object has gone, or that
+  // its track's sequencer does not play.
   fixture.engine.setProject(fixture.project(), fixture.scratch);
   CHECK(describeEdit(fixture.engine) == clean);
-  projection.clips().begin()->second.parts.front()->removeFromParent();
+  projection.tracks().at(track).sequencer->publish({}, 48'000.0);
   projection.devices().begin()->second.plugin->removeFromParent();
   const TrackId extra = fixture.addTrack(TrackKind::Audio);
   internal::TracktionAccess::edit(fixture.engine)
       .deleteTrack(projection.tracks().at(extra).track.get());
   const std::string missing = describeEdit(fixture.engine);
   CHECK(contains(missing, "of the projection is not in the edit"));
-  CHECK(contains(missing, "engine clips, 0 in the edit"));
+  CHECK(contains(missing, "is missing from its track's sequence"));
 }
 
 TEST_CASE("the engine is told what LINA decides in its place", "[projection]") {

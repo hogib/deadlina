@@ -116,7 +116,9 @@ reconsidered if its quality turns out not to be good enough.
 - A fuzz target for the project file reader is built when `LINA_BUILD_FUZZERS` is on (Clang
   only). It is not part of the gating suite; its seed corpus is replayed by an ordinary test.
 - Longer runs outside the gating suite: `LINA_PROJECTION_SOAK=<n>` multiplies the projection
-  oracle's sequences; `lina_projection_bench` measures edits on a large project.
+  oracle's sequences; `lina_projection_bench` measures edits on a reference-size project and
+  `lina_projection_large_bench` on doc 11's large project, counting the playback graphs each
+  edit builds. Timing targets are checked by the benches only, never by the gating suite.
 - `LINA_UPDATE_AUDIO_REFS=1` rewrites the reference audio and fails the test on purpose.
   `tests/audio-refs/tone.flac` was made with `flac --best` from a 0.25 second 1 kHz tone at
   48 kHz, 16 bit; JUCE's bundled FLAC encoder trips UBSan and is not used in tests.
@@ -126,7 +128,8 @@ reconsidered if its quality turns out not to be good enough.
   themselves, so a test binary run by hand behaves as it does under CTest.
 - Reference audio comparisons state their tolerance per test. A test that depends on a
   third-party plugin is not allowed in the gating suite; a small test instrument and effect of
-  our own are built for the purpose.
+  our own are built for the purpose, and a MIDI probe that records every message reaching it,
+  which the stuck-note sweeps place after the instrument.
 - Golden project files live in `tests/golden/v<N>/` and are never edited after the format
   version that wrote them is released.
 

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // What a MIDI clip plays, worked out from the document's ticks alone: every
-// note-on and note-off with the sample frame it falls on. The projection hands
-// these to the engine in place of the engine's own reading of a clip, which
-// ends every note 0.0001 seconds early (docs/design/13-architecture.md).
+// note-on and note-off with the sample frame it falls on. LINA's own sequencer
+// plays these (sequence.hpp, sequencer.hpp); the engine is given no MIDI
+// clips (docs/design/13-architecture.md).
 //
 // Rules (docs/design/08-midi-clips-and-note-editing.md, "Playback"):
 //   - A note sounds when its start lies inside the stretch of content being
