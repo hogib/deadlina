@@ -23,12 +23,17 @@ input or clip playback → clip gain → device chain → volume and pan → out
 ## The mixer strip
 
 1. **(R1)** Volume, from silence to +6 dB, with the default at 0 dB.
-2. **(R1)** Pan, with a centre detent. Panning keeps perceived loudness steady across the range.
+2. **(R1)** Pan, with a centre detent. Panning keeps perceived loudness steady across the range:
+   pan is a constant-power balance with unity gain at centre, so a signal panned hard to one
+   side is 3 dB louder on that side and silent on the other. Decided 2026-11-22.
 3. **(R1)** Mute. A muted track keeps processing, so unmuting is instant and reverbs do not
    restart from silence.
 4. **(R1)** Solo. Soloing a track silences all tracks that are not soloed. Return tracks stay
    audible so that a soloed track is heard with its send effects. Clicking solo on another track
-   moves the solo there; a modifier adds to the soloed set. *Proposed.*
+   moves the solo there; a modifier adds to the soloed set. *Proposed.* Soloing a return track
+   silences the other returns and the direct output of tracks that are not soloed, while their
+   sends keep feeding the soloed return; soloing a track never silences returns. Decided
+   2026-11-22.
 5. **(R1)** Arm for recording, with the input chosen on the strip.
 6. **(R1)** A level meter showing peak level, with an indicator that latches when the level has
    exceeded full scale until the user clears it.
@@ -114,7 +119,3 @@ input or clip playback → clip gain → device chain → volume and pan → out
 6. A track's input is stored without depending on a device being present: an audio input by
    channel number, mono or stereo; a MIDI input as "all" or one device by the name the system
    reports. A device that is missing is kept as stored. Decided 2026-11-21.
-7. As built 2026-11-22, to confirm: pan is a constant-power balance with unity gain at centre,
-   so a signal panned hard to one side is 3 dB louder on that side. Solo on a return track
-   silences the other returns and the direct output of tracks that are not soloed, while their
-   sends keep feeding; solo on a track never silences returns.

@@ -311,17 +311,13 @@ Proposed earlier, still open:
 2. JSON was chosen over XML and TOML for being simple to write canonically and widely readable.
    Any objection?
 
-As built 2026-11, to confirm:
+Confirmed by the owner 2026-11-22: the format as built, including plugin state in separate
+files named by content, the required `written_by` string, the record shapes (named members,
+media referred to by identity, variants as objects with `"type"`), no optional or ignored keys,
+and the lock held through the kernel.
 
-3. Plugin state in separate binary files named by content, rather than encoded inside the
-   document (doc 10 was changed to match).
-4. `written_by`: required, free text, no effect on loading. Consequence: a document loaded and
-   saved again without changes is byte-identical only when the same version of the application
-   writes it (doc 10, "Fidelity").
-5. The record shapes: named members everywhere (`{ "start": 441, "end": 352800 }`) rather than
-   positional pairs, except the time signature; clips refer to media by identity, with the media
-   references in a list of their own; variants as objects with `"type"`.
-6. No optional or ignored keys: every added key is a new format version.
+As built 2026-11, still to confirm:
+
 7. `backup/project.unreadable.lina` stays until someone removes it, and while it is there no
    state file is collected. Should a later save or the user remove it?
 8. A file system without locks: the project opens only if the user agrees to go on unprotected.

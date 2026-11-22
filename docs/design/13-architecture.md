@@ -243,8 +243,8 @@ safely.
 
 1. How a recovery copy is taken without stalling the main thread on a large project.
 2. Editing while playing misses doc 11's response targets on a large project, because
-   Tracktion rebuilds its whole graph per edit ("The projection as built", 8). Accept for the
-   first release, or look for a way round?
+   Tracktion rebuilds its whole graph per edit ("The projection as built", 8). Decided
+   2026-11-22: work on it now, before it becomes an issue. Ways round are being measured.
 3. The model finds objects by scanning and has no index by identity. Its cost on the large
    project of doc 11 is unmeasured.
 4. Undo history has no depth limit, and each removal keeps a full copy of what it removed.

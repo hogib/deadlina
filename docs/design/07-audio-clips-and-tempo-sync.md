@@ -14,9 +14,12 @@ warp markers come later.
 2. **(R1)** Nothing a clip does changes the file. Two clips may use the same file with different
    regions and settings.
 3. **(R1)** A clip has a gain setting, applied before the track's device chain.
-4. **(R1)** If the file's sample rate differs from the project's, it is converted during playback
-   with a converter good enough that the difference is not audible. The user does not have to
-   convert files by hand.
+4. **(R1)** If the file's sample rate differs from the project's, it is converted to the
+   project's rate when it is imported, and the converted copy is what the project uses. The user
+   does not have to convert files by hand. Converting once, rather than while playing, keeps
+   playback exactly repeatable whatever the audio buffer size (doc 11). Decided 2026-11-22.
+   `[own design]` Until import exists, such files are converted while playing; their start can
+   then shift by up to half a sample depending on the buffer size.
 
 ## Following the tempo
 
@@ -107,11 +110,6 @@ release that knowledge is a single number per clip.
 2. Which compressed formats must import in the first release?
 3. Tempo detection estimates a tempo; it does not find where bar one starts. Is it enough for the
    first release that the user trims the clip start to the downbeat by hand?
-4. As built 2026-11-22, to decide: a file whose sample rate differs from the device's is
-   converted while playing. The result is clean, but its start shifts by up to half a sample
-   depending on the audio block size, so playback is not exactly repeatable across block sizes.
-   Converting such files to the project's rate on import would remove that. Proposed: convert
-   on import.
-5. As built 2026-11-22: clip edges and loop joins are hard cuts; the fades of doc 06 and the
+4. As built 2026-11-22: clip edges and loop joins are hard cuts; the fades of doc 06 and the
    loop-join crossfade above are not built yet. Formats other than WAV and AIFF do not play
    until import converts them.
