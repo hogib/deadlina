@@ -41,24 +41,24 @@ the MIDI 1.0 specification `[literature: MIDI 1.0 Detailed Specification]`.
    Decided 2026-11-22.
 4. **(R1)** When a clip stops, held sustain pedal and pitch bend are returned to rest so that the
    next clip does not inherit them.
-5. **(R1)** A note that starts before the clip's content start, or before the loop start once the
+5. **(R1)** Note timing is sample-accurate within the audio buffer; notes are not rounded to
+   buffer boundaries.
+6. **(R1)** A note that starts before the clip's content start, or before the loop start once the
    loop has wrapped, does not sound, even where its end lies in the played part. Rule 3 applies
    only to notes the clip would have played had playback begun at its content start. Decided
    2026-11-22 to follow Live. `[public: unverified]` (user forum reports, not the manual)
-6. **(R1)** Splitting a clip does not split the notes that cross the cut: in the second clip such
-   a note starts before the content start and does not sound (rule 5). Splitting notes is a
+7. **(R1)** Splitting a clip does not split the notes that cross the cut: in the second clip such
+   a note starts before the content start and does not sound (rule 6). Splitting notes is a
    separate command of the note editor. Decided 2026-11-22 to follow Live; Live's manual
    describes a separate note-splitting command, and user reports describe the clip split.
    `[manual]` for the separate command, `[public: unverified]` for the clip split
-7. **(R1)** Notes carry no MIDI channel. Every note is sent to the track's instrument on channel 1.
+8. **(R1)** Notes carry no MIDI channel. Every note is sent to the track's instrument on channel 1.
    Decided 2026-11-22 for the first release; multi-channel setups need another mechanism later.
-8. **(R1)** An edit made while playing does not start a note that already covers the playhead:
+9. **(R1)** An edit made while playing does not start a note that already covers the playhead:
    a note drawn under the playhead, or a clip moved so that it covers the playhead, sounds from
    the note's next start. Rule 3 still applies when playback itself begins in the middle of a
    note. Dragging a clip across the playhead makes many small moves, and starting notes on
    each would make blips. Decided 2026-11-22. `[own design]`
-5. **(R1)** Note timing is sample-accurate within the audio buffer; notes are not rounded to
-   buffer boundaries.
 
 ## The note editor (piano roll)
 
@@ -107,5 +107,5 @@ the MIDI 1.0 specification `[literature: MIDI 1.0 Detailed Specification]`.
 1. Should standard MIDI file import be in the first release? It is the only way to bring in
    existing note material.
 2. Live lets the user turn chasing of notes (rule 3) off. Should LINA offer that switch? `[manual]`
-3. Rules 5 and 6 rest on user reports of Live's behaviour; check them against Live itself if the
-   owner has a copy (doc 01, open question 1 on observation).
+3. Rules 6 and 7 of "Playback" rest on user reports of Live's behaviour; check them against
+   Live itself if the owner has a copy (doc 01, open question 1 on observation).
