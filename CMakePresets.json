@@ -121,6 +121,15 @@
         "RTSAN_OPTIONS": "halt_on_error=1"
       }
     },
-    { "name": "coverage", "inherits": "base", "configurePreset": "coverage" }
+    {
+      "name": "coverage",
+      "inherits": "base",
+      "configurePreset": "coverage",
+      "filter": {
+        "exclude": {
+          "name": "the main thread publishes while the audio thread plays"
+        }
+      }
+    }
   ]
 }

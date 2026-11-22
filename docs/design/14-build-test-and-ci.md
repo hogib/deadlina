@@ -129,6 +129,9 @@ reconsidered if its quality turns out not to be good enough.
   cannot see, and finished threads Qt never joins. The entries match what a report names
   without Qt's debug symbols; the test presets set `DEBUGINFOD_URLS` empty, so the symbolizer
   never fetches symbols over the network and reports read the same on every machine.
+- The test where the main and audio threads run at once is left out of the coverage run: which
+  retry paths of its lock-free loops it reaches depends on timing, so the figures would differ
+  from run to run. It runs in every other preset.
 - Each Qt Quick Test file runs in a process of its own: TSan's thread registry crashed when a
   second QML engine in one process reused the id of a thread Qt had not joined.
 - `catch_discover_tests` cannot take list-valued test properties, so the interface tests set
