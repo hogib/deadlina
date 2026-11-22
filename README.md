@@ -30,8 +30,8 @@ Requirements: Linux, CMake 3.28 or newer, Ninja, GCC and Clang with C++23 suppor
 GCC 16 and Clang 23), Qt 6.12 (base), nlohmann/json 3.12, and the development packages for ALSA, FreeType, Fontconfig and X11.
 
 ```sh
-git clone https://github.com/hogib/LINA.git
-cd LINA
+git clone https://github.com/hogib/deadlina.git
+cd deadlina
 # Tracktion Engine refers to JUCE by an SSH address; fetch it over HTTPS instead.
 git -c url.https://github.com/.insteadOf=git@github.com: submodule update --init --recursive
 
