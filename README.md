@@ -9,10 +9,10 @@ centre of the design. LINA is meant to fill that gap.
 
 ## Status
 
-**Early implementation. There is no application to run yet.**
+**Early implementation. The application starts, but makes no sound and has no clips yet.**
 
 The repository holds the design documents, the project rules, the build and test scaffolding,
-and four libraries:
+and these parts:
 
 - the document model: musical time, tracks, clips, notes, undoable commands;
 - the project file format: a canonical text document, a strict reader, and safe saving with
@@ -20,14 +20,16 @@ and four libraries:
 - the engine: the playback engine driven without an audio device, with rendering to a buffer
   or a file;
 - the projection: the document turned into sound, for arrangement clips and the mixer, kept up
-  to date edit by edit.
+  to date edit by edit; LINA plays MIDI clips with a sequencer of its own;
+- the interface shell: the main window with stacked session and arrangement panes (still
+  empty), the command list, undo and redo, the transport bar, light and dark.
 
-There is no interface yet, and no session view. All design documents are drafts.
+It cannot yet open a sound device of the system. All design documents are drafts.
 
 ## Building
 
 Requirements: Linux, CMake 3.28 or newer, Ninja, GCC and Clang with C++23 support (developed with
-GCC 16 and Clang 23), Qt 6.12 (base), nlohmann/json 3.12, and the development packages for ALSA, FreeType, Fontconfig and X11.
+GCC 16 and Clang 23), Qt 6.12 (base and declarative), nlohmann/json 3.12, and the development packages for ALSA, FreeType, Fontconfig and X11.
 
 ```sh
 git clone https://github.com/hogib/deadlina.git
@@ -38,6 +40,7 @@ git -c url.https://github.com/.insteadOf=git@github.com: submodule update --init
 cmake --preset dev
 cmake --build --preset dev
 ctest --preset dev
+./build/dev/src/app/lina
 ```
 
 Other presets: `release`, and on Clang `asan`, `tsan`, `rtsan` and `coverage`. See

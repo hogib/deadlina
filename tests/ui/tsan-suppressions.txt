@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# ThreadSanitizer suppressions for the interface tier only (tests/ui/CMakeLists.txt).
+#
+# Qt is not instrumented, and Qt 6 builds QMutex on futexes, which ThreadSanitizer does not
+# see; races that Qt synchronises that way are reported falsely. The entries below match what
+# a report names when Qt has no debug information, as in CI: only Qt's exported functions have
+# names, and the rest of a Qt frame is its library.
+#
+# QObject::moveToThread. When the QML engine starts its type-loader thread (QQmlThread), the
+# main thread records the objects moved to it in a list, and the new thread frees the list
+# when it starts; both hold the thread's QMutex (qthread.cpp, BindingStatusOrList).
+race:QObject::moveToThread
+#
+# libQt6Qml. The QML engine hands work to its type-loader thread as messages, allocated on the
+# main thread and run and deleted on the loader thread, queued under the thread's QMutex
+# (qqmlthread_impl.cpp, QQmlThread::callMethodInThread and QQmlThreadPrivate::threadEvent).
+# Neither frame is exported, so the library is named. A frame of this library appears in a
+# report only where QML code itself did the access or called directly into what did; LINA's
+# own interface code runs on the main thread only.
+race:libQt6Qml.so
+#
+# QThread::start. A QThread that has finished is not joined with pthread_join; ThreadSanitizer
+# reports it as leaked when the process ends (seen for the QML type-loader thread). LINA's own
+# code starts no QThread, and JUCE's threads do not go through QThread::start.
+thread:QThread::start

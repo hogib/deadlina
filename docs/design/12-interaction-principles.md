@@ -107,3 +107,18 @@ yes or no. All statements are `[own design]`.
    and the mixer go? A stacked pair already uses most of the window's height.
 2. The searchable command list in the first release: yes (proposed) or later?
 3. The fixed help area that explains whatever is under the pointer: yes (proposed) or later?
+4. The shell built on 2026-11-23 made provisional choices, to be confirmed when the session and
+   arrangement views are built (the owner deferred them then):
+   - The session is on top. The divider's position is not saved, because the view file has no
+     field for it; the pane that has the keys is saved.
+   - The command list (question 2) and the help area (question 3) are built as proposed. The
+     command list opens with Ctrl+K.
+   - Shortcuts: Space plays from the start marker or stops, Shift+Space continues from the
+     playhead, a second stop returns to the start marker (the stop button names what it will
+     do), F6 and Shift+F6 move between panes, Ctrl+1 and Ctrl+2 go to the session and the
+     arrangement, Ctrl+T and Ctrl+Shift+T add an audio and a MIDI track, Ctrl+= or Ctrl++,
+     Ctrl+- and Ctrl+0 change the size, Escape cancels a drag, Ctrl+Y also redoes; Ctrl+N, O,
+     S, Shift+S, Q, Z and Shift+Z as usual.
+   - Command names are in title case ("Undo Add Track").
+   - The pane with the keys has a thicker frame as well as the focus colour, so focus is not
+     shown by colour alone. Clicking a button does not take the keys from the pane.

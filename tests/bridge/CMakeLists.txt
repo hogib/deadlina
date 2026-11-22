@@ -14,3 +14,13 @@ lina_add_catch_test(lina_bridge_event_loop_test
     ENVIRONMENT_MODIFICATION "DISPLAY=unset:"
     # A test that waits for an event that never comes fails on its own deadline first.
     TIMEOUT 120)
+
+# The interface's view of the engine, with a manual device and a clock of the test's own.
+lina_add_catch_test(lina_bridge_engine_playback_test
+  SOURCES engine_playback_test.cpp
+  LIBRARIES lina::bridge lina::engine_testing
+  PROPERTIES
+    FAIL_REGULAR_EXPRESSION "JUCE Assertion failure|Leaked objects detected"
+    ENVIRONMENT "TMPDIR=${lina_bridge_test_scratch}/tmp"
+    ENVIRONMENT_MODIFICATION "DISPLAY=unset:"
+    TIMEOUT 120)

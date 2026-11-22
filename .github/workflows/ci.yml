@@ -99,11 +99,14 @@ jobs:
           echo "Server = https://archive.archlinux.org/repos/${ARCH_ARCHIVE_DATE}/\$repo/os/\$arch" \
             > /etc/pacman.d/mirrorlist
           # glibc-locales: the file format's locale test needs a locale with a decimal comma.
+          # qt6-declarative: Qt Quick, its controls and dialogs, and Qt Quick Test. ttf-dejavu:
+          # the interface tests draw text offscreen and fail on any Qt warning, such as the one
+          # about a missing font.
           # The archive is sometimes slow to answer; try three times before giving up.
           for attempt in 1 2 3; do
             pacman -Syyuu --noconfirm --needed \
               git cmake ninja gcc clang llvm compiler-rt pkgconf nlohmann-json glibc-locales \
-              alsa-lib freetype2 fontconfig libglvnd qt6-base \
+              alsa-lib freetype2 fontconfig libglvnd qt6-base qt6-declarative ttf-dejavu \
               libx11 libxext libxrandr libxinerama libxcursor libxrender libxcomposite \
               && break
             [[ $attempt -lt 3 ]] || exit 1

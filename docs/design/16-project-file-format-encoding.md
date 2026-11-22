@@ -256,6 +256,9 @@ order, any white space, and an integer literal where a decimal is expected (`"vo
    from `project.lina` (or there is no `project.lina`). Since a save removes the copy, one that
    is there was written after the last save. File times are not used to decide, only shown:
    they are coarse on some file systems and change with clock steps and sync tools.
+3. As built on 2026-11-23, the application offers an existing recovery copy when opening a
+   project but does not yet write one; writing it waits for file work to move off the main
+   thread (doc 13, open question 5).
 
 ## Lock
 
@@ -275,6 +278,11 @@ order, any white space, and an integer literal where a decimal is expected (`"vo
      lets the user decide whether to go on without the protection;
    - *read-only*: the folder cannot be written to (reported as an error of its own kind), so the
      application can offer to open the project without saving.
+4. As built in the application: a folder without locks or one that cannot be written to is
+   opened only after the user agrees, and a project opened read-only is saved with Save As.
+   Save As needs an empty folder. It refuses a project that keeps media or plugin state inside
+   its folder until copying them into the new folder is built. Opening the project that is
+   already open says so instead of reporting a lock held elsewhere.
 
 ## View state
 
@@ -283,7 +291,7 @@ order, any white space, and an integer literal where a decimal is expected (`"vo
 | Key | Type | Meaning |
 |---|---|---|
 | `format` | integer | `1`. |
-| `view` | name | `session` or `arrangement`: which view is showing. |
+| `view` | name | `session` or `arrangement`: which view has the keys (both are shown, stacked; doc 12). |
 | `arrangement_zoom` | decimal | Horizontal zoom of the arrangement, greater than 0. The unit is a placeholder (a factor, 1 for the default width), to be fixed when the arrangement view exists. |
 | `arrangement_scroll` | ticks | The arrangement position at the left edge. |
 

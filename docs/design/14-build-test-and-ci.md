@@ -102,7 +102,7 @@ reconsidered if its quality turns out not to be good enough.
 | Projection | Incremental projection equals a from-scratch build, for generated command sequences (doc 13) | Catch2 | Engine, no audio device |
 | Audio | Offline render of small projects compared with checked-in reference audio within a stated tolerance | Catch2 | Engine, no audio device |
 | Session timing | Launch boundaries, scene launch, stop, record rounding, at the exact sample | Catch2 | Engine driven block by block |
-| Interface | QML components and custom items with synthesized input | Qt Quick Test, offscreen | Qt; `QT_QUICK_BACKEND=rhi` must be set or the offscreen platform silently picks the software renderer |
+| Interface | Controllers and models in C++; QML components and custom items with synthesized input; the application started offscreen without audio | Catch2 and Qt Quick Test, offscreen | Qt; `QT_QUICK_BACKEND=rhi` must be set or the offscreen platform silently picks the software renderer, and `QSG_RHI_BACKEND=null` too, because the offscreen platform has no OpenGL without a display server (the null backend still runs the real scene-graph renderer) |
 | Benches | The targets of doc 11 on the reference machine | Own harness | Not part of the gating suite at first |
 
 - Tests never open a real audio device, read the wall clock, sleep, use the network or use
@@ -123,7 +123,16 @@ reconsidered if its quality turns out not to be good enough.
   `tests/audio-refs/tone.flac` was made with `flac --best` from a 0.25 second 1 kHz tone at
   48 kHz, 16 bit; JUCE's bundled FLAC encoder trips UBSan and is not used in tests.
 - ThreadSanitizer: one suppression, in the engine tests' support code, for a write-only static
-  inside JUCE's memory-mapped reader that two engines in one process both touch.
+  inside JUCE's memory-mapped reader that two engines in one process both touch. The interface
+  tests have their own file, `tests/ui/tsan-suppressions.txt`, for races TSan reports inside Qt
+  6.12: the QML type loader's thread, synchronised by Qt's own futex-based mutex that TSan
+  cannot see, and finished threads Qt never joins. The entries match what a report names
+  without Qt's debug symbols; the test presets set `DEBUGINFOD_URLS` empty, so the symbolizer
+  never fetches symbols over the network and reports read the same on every machine.
+- Each Qt Quick Test file runs in a process of its own: TSan's thread registry crashed when a
+  second QML engine in one process reused the id of a thread Qt had not joined.
+- `catch_discover_tests` cannot take list-valued test properties, so the interface tests set
+  their own environment (offscreen platform, renderer, scratch folders).
 - Engine and bridge tests set `HOME` and `TMPDIR` to a scratch folder and unset `DISPLAY`
   themselves, so a test binary run by hand behaves as it does under CTest.
 - Reference audio comparisons state their tolerance per test. A test that depends on a
@@ -156,12 +165,13 @@ reconsidered if its quality turns out not to be good enough.
      the stack builds and starts with that runtime.
 2. All jobs run in the official Arch Linux container image, pinned by digest, and install their
    packages from the Arch Linux Archive snapshot of one fixed day, which pins the compiler and
-   CMake versions (and Qt, once it is used). The pins live in the workflow file. Installing in
+   CMake and Qt versions. The pins live in the workflow file. Installing in
    every job is slower than a prebuilt image; a prebuilt image would need a registry to publish
    it to.
 3. Builds and tests run as an ordinary user inside the container, as on a developer's machine;
    tests of file permissions mean nothing to the superuser. A locale with a decimal comma is
-   installed for the file format's locale test.
+   installed for the file format's locale test, and a font, because the interface tests draw
+   text offscreen and fail on any Qt warning, such as one about a missing font.
 4. The third-party static library is cached between runs, keyed by the pinned commit and the
    compiler version.
 5. CI runs on GitHub Actions (decided 2026-11-13). The workflow is added with the first buildable

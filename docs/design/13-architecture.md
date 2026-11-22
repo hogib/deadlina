@@ -44,8 +44,8 @@ lina_app ──► lina_ui ──► lina_bridge ──► lina_engine ──►
 | `lina_model` | Document types, exact musical time, identities, commands, undo, change sets | C++23 standard library | Qt, JUCE, Tracktion |
 | `lina_format` | Reading and writing the project document, migrations (doc 16) | `lina_model`, a JSON parser | Qt, JUCE, Tracktion |
 | `lina_engine` | Projection into a Tracktion edit, transport and launch control, recording, rendering, plugin hosting, engine-state snapshots | `lina_model`, Tracktion, JUCE | Qt |
-| `lina_bridge` | Event-loop integration, QObject controllers, list models over the document | `lina_model`, `lina_engine`'s public headers, Qt | Tracktion or JUCE types in any header QML can see |
-| `lina_ui` | QML and custom scene-graph items | `lina_bridge`, `lina_model` (read-only), Qt Quick | Tracktion, JUCE |
+| `lina_bridge` | Event-loop integration; the interface's view of the engine (`Playback`, `EnginePlayback`) | `lina_model`, `lina_engine`'s public headers, Qt | Tracktion or JUCE types in any header QML can see |
+| `lina_ui` | QObject controllers and list models over the document (commands, the document and its files, transport, workspace, appearance), QML and custom scene-graph items | `lina_bridge`, `lina_model`, `lina_format`, Qt Quick | Tracktion, JUCE |
 | `lina_app` | `main`, command line, start-up | all | |
 
 - The build enforces the "must not use" column: `lina_model` and `lina_format` have no Qt or
@@ -255,11 +255,37 @@ safely.
 6. List models for chrome (track headers, device chains, browser) are thin adapters over the
    document and its change sets.
 
+### The shell as built
+
+Built 2026-11-23: main window, session and arrangement panes (placeholders until their views
+are built), focus, the command registry and command list, undo and redo naming, the transport
+bar, the help area, notices and questions, light and dark.
+
+1. **One owner of the document.** A document controller owns it; every edit is a command or a
+   gesture (a drag that becomes one undo step). Each change set goes to the engine first and
+   then to the interface's models. If the engine throws, the notice says so and the edit
+   stands.
+2. **Commands.** Every user action is registered once, with an identifier, a translated name, a
+   one-sentence description, shortcuts and an action. Menus, buttons, the command list and the
+   help area all read the registry. Shortcuts are dispatched through it; text fields keep the
+   keys they type and edit with. Commands pause while a question is open.
+3. **The engine through an interface.** The interface sees the engine only through `Playback`
+   in `lina_bridge`, so tests replace it with a fake. Without a sound device the engine's own
+   device driven by hand runs in real time from a timer on the main thread, and its audio is
+   discarded.
+4. **Playhead.** The engine reports no position yet. The bridge counts the frames it has run
+   and converts them to ticks at the current tempo; the interface polls it once per frame,
+   only while playing.
+5. **Leaving or saving during a drag** first ends the drag as it stands. Escape cancels it.
+
 ## Start-up and shutdown
 
 1. Start the Qt application, create JUCE on the main thread, install the event-loop bridge,
-   create the engine, then load QML. Plugin scanning starts in the background afterwards.
-2. Shutdown stops the audio device, closes plugin windows, destroys the engine, then Qt.
+   create the engine, then load QML with the window hidden. Open the audio output (skipped with
+   `--no-audio`), open the project named on the command line, then show the window. Plugin
+   scanning starts in the background afterwards.
+2. Shutdown closes the audio output, closes plugin windows, destroys QML, then the interface's
+   controllers, the engine, the event-loop bridge and JUCE, and finally Qt.
 
 ## Open questions
 
@@ -276,3 +302,8 @@ safely.
 3. The model finds objects by scanning and has no index by identity. Its cost on the large
    project of doc 11 is unmeasured.
 4. Undo history has no depth limit, and each removal keeps a full copy of what it removed.
+5. As built, saving, loading and taking the project lock run on the main thread, where the
+   threads table gives them to workers, and the silent output runs Tracktion's graph from a
+   10 ms timer on the main thread. Both are to move before a large project is opened in the
+   application. The engine also needs a call that opens a sound device of the system and one
+   that reports the playhead.
