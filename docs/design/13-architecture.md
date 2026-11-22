@@ -123,7 +123,8 @@ lina_app ──► lina_ui ──► lina_bridge ──► lina_engine ──►
    edit built from scratch from the resulting document. This is checked in tests for randomly
    generated command sequences.
 4. Tracktion's own undo manager and file saving are not used.
-5. Policies the engine leaves to the application live here, on top of its launch handles: one
+5. Policies the engine leaves to the application live here, on top of its launch handles for
+   audio clips; MIDI clips are played and launched by LINA's own sequencer (open question 2): one
    clip per track, scene launch with empty slots stopping, "stop all", the relaunch set, launch
    boundaries computed in ticks, rounding record length to quantisation, return-track and send
    bookkeeping, exclusive solo.
@@ -244,7 +245,13 @@ safely.
 1. How a recovery copy is taken without stalling the main thread on a large project.
 2. Editing while playing misses doc 11's response targets on a large project, because
    Tracktion rebuilds its whole graph per edit ("The projection as built", 8). Decided
-   2026-11-22: work on it now, before it becomes an issue. Ways round are being measured.
+   2026-11-22: LINA plays MIDI clips itself, through a sequencer of its own on every MIDI
+   track, and Tracktion keeps audio clips, the mixer and plugins. Measured on the large
+   project, a note or MIDI clip edit then costs well under a millisecond and rebuilds nothing,
+   against about 300 ms before. Audio clip edits (about 65 ms) and tempo changes (about 125 ms)
+   still rebuild Tracktion's graph at that size; LINA playing audio clips too is the way out if
+   that ever matters. Consequence: MIDI clips are launched by LINA's sequencer, not through
+   Tracktion's launch handles (item 5 of "The projection" holds for audio clips only).
 3. The model finds objects by scanning and has no index by identity. Its cost on the large
    project of doc 11 is unmeasured.
 4. Undo history has no depth limit, and each removal keeps a full copy of what it removed.

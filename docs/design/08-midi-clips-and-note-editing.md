@@ -37,7 +37,8 @@ the MIDI 1.0 specification `[literature: MIDI 1.0 Detailed Specification]`.
    end sounds until that boundary and is cut there. The stored note keeps its full length.
 3. **(R1)** When playback begins in the middle of a note, the note sounds from that point for
    the rest of its length, so that a long held note or pad is not silent just because play
-   started after its beginning. Decided 2026-11-13.
+   started after its beginning. Decided 2026-11-13. It starts on the exact first frame played.
+   Decided 2026-11-22.
 4. **(R1)** When a clip stops, held sustain pedal and pitch bend are returned to rest so that the
    next clip does not inherit them.
 5. **(R1)** A note that starts before the clip's content start, or before the loop start once the
@@ -51,6 +52,11 @@ the MIDI 1.0 specification `[literature: MIDI 1.0 Detailed Specification]`.
    `[manual]` for the separate command, `[public: unverified]` for the clip split
 7. **(R1)** Notes carry no MIDI channel. Every note is sent to the track's instrument on channel 1.
    Decided 2026-11-22 for the first release; multi-channel setups need another mechanism later.
+8. **(R1)** An edit made while playing does not start a note that already covers the playhead:
+   a note drawn under the playhead, or a clip moved so that it covers the playhead, sounds from
+   the note's next start. Rule 3 still applies when playback itself begins in the middle of a
+   note. Dragging a clip across the playhead makes many small moves, and starting notes on
+   each would make blips. Decided 2026-11-22. `[own design]`
 5. **(R1)** Note timing is sample-accurate within the audio buffer; notes are not rounded to
    buffer boundaries.
 
