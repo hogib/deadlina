@@ -67,7 +67,14 @@ profile_dir="$build_dir/profiles"
 rm -rf -- "$profile_dir"
 mkdir -p -- "$profile_dir"
 # %p: process id, %m: binary signature. One raw profile per process and binary.
-LLVM_PROFILE_FILE="$profile_dir/%p-%m.profraw" ctest --preset coverage
+ctest_log="$build_dir/ctest.log"
+LLVM_PROFILE_FILE="$profile_dir/%p-%m.profraw" ctest --preset coverage | tee "$ctest_log"
+# A skipped test measures nothing, and what is skipped depends on the machine (installed
+# locales, running as root). Figures taken with skips would differ between machines.
+if grep -q -- '\*\*\*Skipped' "$ctest_log"; then
+  grep -- '\*\*\*Skipped' "$ctest_log" >&2
+  fail "tests were skipped (listed above); coverage would depend on this machine"
+fi
 
 shopt -s nullglob
 profiles=("$profile_dir"/*.profraw)

@@ -98,10 +98,17 @@ jobs:
         run: |
           echo "Server = https://archive.archlinux.org/repos/${ARCH_ARCHIVE_DATE}/\$repo/os/\$arch" \
             > /etc/pacman.d/mirrorlist
-          pacman -Syyuu --noconfirm --needed \
-            git cmake ninja gcc clang llvm compiler-rt pkgconf nlohmann-json \
-            alsa-lib freetype2 fontconfig libglvnd qt6-base \
-            libx11 libxext libxrandr libxinerama libxcursor libxrender libxcomposite
+          # glibc-locales: the file format's locale test needs a locale with a decimal comma.
+          # The archive is sometimes slow to answer; try three times before giving up.
+          for attempt in 1 2 3; do
+            pacman -Syyuu --noconfirm --needed \
+              git cmake ninja gcc clang llvm compiler-rt pkgconf nlohmann-json glibc-locales \
+              alsa-lib freetype2 fontconfig libglvnd qt6-base \
+              libx11 libxext libxrandr libxinerama libxcursor libxrender libxcomposite \
+              && break
+            [[ $attempt -lt 3 ]] || exit 1
+            sleep 60
+          done
 
       - name: Check out with submodules
         uses: actions/checkout@v4
@@ -139,5 +146,12 @@ jobs:
             build/${{ matrix.cache-preset }}/CMakeFiles/lina_tracktion.dir
           key: third-party-${{ matrix.cache-preset }}-${{ env.TRACKTION_COMMIT }}-${{ steps.prepare.outputs.snapshot }}-gcc${{ steps.prepare.outputs.gcc }}-clang${{ steps.prepare.outputs.clang }}-${{ hashFiles('CMakeLists.txt', 'CMakePresets.json', 'cmake/LinaTracktion.cmake', 'cmake/LinaInstrumentation.cmake') }}
 
+      # As an ordinary user, as on a developer's machine: tests of file permissions mean
+      # nothing to the superuser, and the coverage ratchet refuses to measure with skipped tests.
       - name: ${{ matrix.name }}
-        run: ${{ matrix.run }}
+        env:
+          LINA_RUN: ${{ matrix.run }}
+        run: |
+          id lina > /dev/null 2>&1 || useradd --create-home lina
+          chown -R lina "$GITHUB_WORKSPACE"
+          runuser -u lina -- env LINA_JOBS="$LINA_JOBS" bash -eo pipefail -c "$LINA_RUN"

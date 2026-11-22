@@ -140,7 +140,10 @@ reconsidered if its quality turns out not to be good enough.
 2. The current figures are stored in a small checked-in file. CI fails if either figure is lower
    than the stored one. It also fails if a figure is higher, until the file is updated in the
    same commit, so the stored figures never lag behind.
-3. Excluded from the figure: generated code (`moc`, QML type registration) and third-party code.
+3. A run in which any test was skipped is refused: what is skipped depends on the machine
+   (installed locales, running as the superuser), and the figures would then differ between a
+   developer's machine and CI.
+4. Excluded from the figure: generated code (`moc`, QML type registration) and third-party code.
 
 ## Continuous integration
 
@@ -153,9 +156,12 @@ reconsidered if its quality turns out not to be good enough.
    CMake versions (and Qt, once it is used). The pins live in the workflow file. Installing in
    every job is slower than a prebuilt image; a prebuilt image would need a registry to publish
    it to.
-3. The third-party static library is cached between runs, keyed by the pinned commit and the
+3. Builds and tests run as an ordinary user inside the container, as on a developer's machine;
+   tests of file permissions mean nothing to the superuser. A locale with a decimal comma is
+   installed for the file format's locale test.
+4. The third-party static library is cached between runs, keyed by the pinned commit and the
    compiler version.
-4. CI runs on GitHub Actions (decided 2026-11-13). The workflow is added with the first buildable
+5. CI runs on GitHub Actions (decided 2026-11-13). The workflow is added with the first buildable
    code, not before.
 
 ## Tools
